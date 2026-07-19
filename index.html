@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Secure Family Connection</title>
+
+    <!-- Supabase JS Standard Library CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <style>
+        :root{
+          --ink:#0B1E23;
+          --panel:#0F2A2E;
+          --panel-raised:#143A3E;
+          --line: rgba(255,255,255,0.08);
+          --teal:#1FBF9C;
+          --teal-dim: rgba(31,191,156,0.16);
+          --amber:#E0A63A;
+          --red:#E1503F;
+          --text:#EAF3F1;
+          --text-dim:#8FA6A3;
+          --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+          --mono: 'SFMono-Regular', Consolas, monospace;
+        }
+        *{box-sizing:border-box; margin:0; padding:0;}
+        html,body{height:100%;}
+        body{
+          font-family: var(--font);
+          background:
+            radial-gradient(circle at 20% -10%, rgba(31,191,156,0.10), transparent 45%),
+            radial-gradient(circle at 90% 110%, rgba(31,191,156,0.06), transparent 40%),
+            var(--ink);
+          color: var(--text);
+          min-height:100%;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          padding: 24px;
+        }
+        .device{
+          width:100%;
+          max-width:400px;
+          min-height:720px;
+          background: var(--panel);
+          border:1px solid var(--line);
+          border-radius:28px;
+          overflow:hidden;
+          display:flex;
+          flex-direction:column;
+          box-shadow: 0 40px 80px -30px rgba(0,0,0,0.6);
+          position:relative;
+        }
+        .topbar{
+          display:flex; align-items:center; gap:10px;
+          padding:18px 20px 14px;
+          border-bottom:1px solid var(--line);
+        }
+        .badge{
+          width:8px;height:8px;border-radius:50%;
+          background: var(--teal);
+          box-shadow: 0 0 0 4px var(--teal-dim);
+        }
+        .topbar .label{ font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:var(--text-dim);}
+        .topbar .label b{color:var(--text); font-weight:600;}
+
+        .screen{ flex:1; display:none; flex-direction:column; padding:32px 24px; }
+        .screen.active{ display:flex; }
+
+        /* ---- Screen 4a: Landing / Auto-Verify ---- */
+        #screen-landing{ align-items:center; justify-content:center; text-align:center; gap:22px; }
+        .shield{
+          width:76px; height:76px; border-radius:20px;
+          background: var(--teal-dim);
+          display:flex; align-items:center; justify-content:center;
+          border:1px solid rgba(31,191,156,0.35);
+        }
+        .shield svg{ width:34px; height:34px; }
+        .spinner{
+          width:30px; height:30px;
+          border-radius:50%;
+          border:3px solid var(--line);
+          border-top-color: var(--teal);
+          animation: spin 0.9s linear infinite;
+        }
+        @keyframes spin{ to{ transform: rotate(360deg); } }
+        h1{ font-size:19px; font-weight:600; letter-spacing:-0.01em; }
+        .sub{ font-size:13.5px; color:var(--text-dim); max-width:280px; line-height:1.5; }
+        .meta{ font-family:var(--mono); font-size:11px; color:var(--text-dim); background:rgba(255,255,255,0.03); border:1px solid var(--line); padding:8px 12px; border-radius:8px; }
+
+        /* ---- Screen 4b: Manual OTP ---- */
+        #screen-otp{ justify-content:center; gap:20px; }
+        .otp-inputs{ display:flex; gap:10px; justify-content:center; margin:6px 0 4px; }
+        .otp-inputs input{
+          width:44px; height:54px;
+          text-align:center;
+          font-size:20px; font-weight:600;
+          color:var(--text);
+          background: rgba(255,255,255,0.04);
+          border:1px solid var(--line);
+          border-radius:12px;
+          outline:none;
+        }
+        .otp-inputs input:focus{ border-color: var(--teal); box-shadow: 0 0 0 3px var(--teal-dim); }
+        .otp-error{ font-size:12.5px; color:var(--red); min-height:16px; text-align:center; }
+        .resend-row{ display:flex; justify-content:center; align-items:center; gap:8px; font-size:13px; color:var(--text-dim); }
+        .resend-row button{ color:var(--teal); font-weight:600; }
+        .resend-row button:disabled{ color:var(--text-dim); cursor:not-allowed; text-decoration:none; }
+
+        /* ---- Buttons ---- */
+        button{ font-family:inherit; border:none; background:none; cursor:pointer; }
+        .btn{
+          width:100%;
+          padding:15px;
+          border-radius:14px;
+          font-size:15px; font-weight:600;
+          background: var(--teal);
+          color:#04211B;
+          transition: transform .15s ease, opacity .15s ease;
+        }
+        .btn:active{ transform: scale(0.98); }
+        .btn:disabled{ opacity:0.4; cursor:not-allowed; }
+
+        /* ---- Screen 5: Connected Call ---- */
+        #screen-call{ padding:0; position:relative; background:#04100F; }
+        .video-wrap{ position:relative; flex:1; }
+        video{ width:100%; height:100%; object-fit:cover; background:#03100E; }
+        #remoteVideo{ position:absolute; inset:0; width:100%; height:100%; }
+        #localVideo{
+          position:absolute; width:104px; height:140px; right:16px; top:16px;
+          border-radius:14px; border:2px solid rgba(255,255,255,0.25);
+          object-fit:cover; box-shadow:0 10px 24px rgba(0,0,0,0.4);
+          z-index: 10;
+        }
+        .rec-pill{
+          position:absolute; top:16px; left:16px;
+          display:flex; align-items:center; gap:6px;
+          background:rgba(0,0,0,0.5); backdrop-filter: blur(6px);
+          padding:6px 10px 6px 8px; border-radius:999px;
+          font-size:11.5px; font-weight:600; letter-spacing:0.02em;
+          z-index: 10;
+        }
+        .rec-dot{ width:8px; height:8px; border-radius:50%; background:var(--red); animation: blink 1s ease-in-out infinite; }
+        @keyframes blink{ 0%,100%{opacity:1;} 50%{opacity:0.25;} }
+        .call-meta{
+          position:absolute; bottom:0; left:0; right:0;
+          padding:18px 20px 24px;
+          background: linear-gradient(to top, rgba(0,0,0,0.75), transparent);
+          display:flex; align-items:center; justify-content:space-between;
+          z-index: 10;
+        }
+        .timer{ font-family:var(--mono); font-size:15px; font-weight:600; }
+        .consent-note{ font-size:10.5px; color:var(--text-dim); margin-top:2px; }
+        .hangup{
+          width:56px; height:56px; border-radius:50%;
+          background: var(--red);
+          display:flex; align-items:center; justify-content:center;
+          box-shadow: 0 8px 20px rgba(225,80,63,0.4);
+        }
+        .hangup svg{ width:22px; height:22px; }
+
+        .console{
+          margin-top:auto;
+          font-family:var(--mono); font-size:10.5px; color:var(--text-dim);
+          background:rgba(255,255,255,0.03); border:1px solid var(--line);
+          border-radius:10px; padding:10px 12px; max-height:110px; overflow-y:auto;
+          line-height:1.6;
+        }
+        .console .line{ opacity:0.85; }
+        .console .line.ok{ color: var(--teal); }
+        .console .line.warn{ color: var(--amber); }
+    </style>
+</head>
+<body>
+
+<div class="device">
+    <div class="topbar">
+        <div class="badge"></div>
+        <div class="label" id="roomLabel">Secure Facility Link&nbsp; · &nbsp;<b id="roomText">Loading...</b></div>
+    </div>
+
+    <!-- SCREEN 4a — Landing / Auto OTP Verify -->
+    <section id="screen-landing" class="screen active">
+        <div class="shield">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#1FBF9C" stroke-width="1.8"><path d="M12 2l8 4v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6l8-4z"/><path d="M9 12l2 2 4-4"/></svg>
+        </div>
+        <h1>Verifying secure connection</h1>
+        <p class="sub">You've received a video call request from a correctional facility. We're automatically confirming this number for the session.</p>
+        <div class="spinner"></div>
+        <div class="meta" id="landingMeta">Verifying routing signatures...</div>
+    </section>
+
+    <!-- SCREEN 4b — Manual OTP fallback -->
+    <section id="screen-otp" class="screen">
+        <h1 style="text-align:center;">Enter the code we sent</h1>
+        <p class="sub" style="text-align:center; margin:0 auto;">Automatic verification didn't complete. Enter the 6-digit code sent to your phone via SMS.</p>
+        <div class="otp-inputs" id="otpInputs">
+            <input maxlength="1" inputmode="numeric" />
+            <input maxlength="1" inputmode="numeric" />
+            <input maxlength="1" inputmode="numeric" />
+            <input maxlength="1" inputmode="numeric" />
+            <input maxlength="1" inputmode="numeric" />
+            <input maxlength="1" inputmode="numeric" />
+        </div>
+        <div class="otp-error" id="otpError"></div>
+        <button class="btn" id="verifyBtn">Verify &amp; Join Call</button>
+        <div class="resend-row">
+            <span>Didn't get a code?</span>
+            <button id="resendBtn">Resend OTP</button>
+        </div>
+    </section>
+
+    <!-- SCREEN 5 — Connected Call -->
+    <section id="screen-call" class="screen">
+        <div class="video-wrap">
+            <video id="remoteVideo" autoplay playsinline></video>
+            <video id="localVideo" autoplay playsinline muted></video>
+            <div class="rec-pill"><span class="rec-dot"></span> This call is recorded</div>
+            <div class="call-meta">
+                <div>
+                    <div class="timer" id="callTimer">00:00</div>
+                    <div class="consent-note">Kiosk 04A · Encrypted (SRTP)</div>
+                </div>
+                <button class="hangup" id="hangupBtn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M3 8.5C3 8.5 6 5 12 5s9 3.5 9 3.5l-3 3.5-3-1.5-1 2.5h-4l-1-2.5-3 1.5-3-3.5z" transform="rotate(180 12 12)"/></svg>
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <div class="console" id="consoleLog" style="margin:12px 16px 16px;"></div>
+</div>
+
+<script>
+    /* ======================================================================
+        1. SUPABASE INITIALIZATION & ROUTING PARSING
+       ====================================================================== */
+    const SUPABASE_URL = "https://vfqufosgzaatydvikuas.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_31-6_doFy14yTBlLKYil7g_Y0E3Gj7I";
+
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // Handle routing segments (/join/$roomId)
+    let roomId = 'ROOM-88213';
+    const pathSegments = window.location.pathname.split('/').filter(segment => segment.length > 0);
+    
+    // Check if URL contains /join/ROOM_ID pattern
+    const joinIndex = pathSegments.indexOf('join');
+    if (joinIndex !== -1 && pathSegments.length > joinIndex + 1) {
+      roomId = pathSegments[joinIndex + 1];
+    } else if (pathSegments.length > 0 && pathSegments[0] !== 'join') {
+      // If last segment doesn't look like 'join', use it as roomId
+      roomId = pathSegments[pathSegments.length - 1];
+    }
+
+    const params = new URLSearchParams(location.search);
+    const token = params.get('token') || '';
+
+    document.getElementById('roomText').textContent = `Room ${roomId}`;
+    document.getElementById('landingMeta').textContent = `token: ${token} · Authenticating Layer`;
+
+    let isSessionAuthorized = false; // Strictly guards startCall execution
+
+    const log = (msg, cls = '') => {
+      const el = document.getElementById('consoleLog');
+      const line = document.createElement('div');
+      line.className = 'line ' + cls;
+      line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      el.appendChild(line);
+      el.scrollTop = el.scrollHeight;
+    };
+
+    function showScreen(id) {
+      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
+    }
+
+    /* ======================================================================
+        2. REAL DATABASE CRYPTO AUTHENTICATION (SECURED)
+       ====================================================================== */
+    async function verifySessionToken(tok, room) {
+      log(`Checking auto-verify mapping tokens…`);
+      try {
+        const { data, error } = await supabaseClient
+          .from('call_rooms')
+          .select('token, room_status')
+          .eq('room_id', room)
+          .maybeSingle();
+
+        if (error || !data) return false;
+
+        // Check if token matches and room is in a valid state for auto-verification
+        return data.token === tok && ['WAITING', 'OTP_SENT', 'ACTIVE'].includes(data.room_status);
+      } catch (err) {
+        return false;
+      }
+    }
+
+    async function verifyOtpSecurely(code, room) {
+      log(`Transmitting OTP validation tokens to RPC…`);
+      try {
+        // Executes the DB function we created in Step 1
+        const { data, error } = await supabaseClient
+          .rpc('verify_room_otp', { target_room: room, input_otp: code });
+
+        if (error) return false;
+        return data === true;
+      } catch (err) {
+        return false;
+      }
+    }
+
+    // Master Execution Flow on Init
+    (async function initLanding() {
+      const autoConnected = await verifySessionToken(token, roomId);
+
+      if (autoConnected) {
+        log('Token pre-verified by system. Joining call...', 'ok');
+        isSessionAuthorized = true;
+        startCall();
+      } else {
+        log('Auto-handshake failed. Redirecting to OTP authentication gateway.', 'warn');
+        showScreen('screen-otp');
+        document.querySelectorAll('#otpInputs input')[0]?.focus();
+      }
+    })();
+
+    /* ======================================================================
+        3. OTP USER INTERACTION INTERFACE
+       ====================================================================== */
+    const otpInputs = [...document.querySelectorAll('#otpInputs input')];
+    otpInputs.forEach((inp, i) => {
+      inp.addEventListener('input', () => {
+        inp.value = inp.value.replace(/\D/g, '');
+        if (inp.value && i < otpInputs.length - 1) otpInputs[i + 1].focus();
+      });
+      inp.addEventListener('keydown', e => {
+        if (e.key === 'Backspace' && !inp.value && i > 0) otpInputs[i - 1].focus();
+      });
+    });
+
+    let resendUsed = false;
+    document.getElementById('resendBtn').addEventListener('click', () => {
+      if (resendUsed) return;
+      resendUsed = true;
+      const btn = document.getElementById('resendBtn');
+      btn.disabled = true;
+      btn.textContent = 'Code resent';
+      log('New OTP challenge requested.', 'warn');
+    });
+
+    document.getElementById('verifyBtn').addEventListener('click', async () => {
+      const code = otpInputs.map(i => i.value).join('');
+      const errEl = document.getElementById('otpError');
+      if (code.length < 6) { errEl.textContent = 'Enter all 6 digits.'; return; }
+      errEl.textContent = '';
+
+      const verifyBtn = document.getElementById('verifyBtn');
+      verifyBtn.disabled = true;
+
+      log(`Verifying entry stream credentials…`);
+      const otpSuccess = await verifyOtpSecurely(code, roomId);
+
+      if (otpSuccess) {
+        log('OTP tokens authenticated.', 'ok');
+        isSessionAuthorized = true;
+        startCall();
+      } else {
+        errEl.textContent = 'Incorrect code. Please try again.';
+        log('Validation failed: Unauthorized entry bypass blocked.', 'warn');
+        otpInputs.forEach(i => i.value = '');
+        otpInputs[0].focus();
+        verifyBtn.disabled = false;
+      }
+    });
+
+    /* ======================================================================
+        4. SUPABASE BROADCAST SIGNALING + WebRTC PIPELINE
+       ====================================================================== */
+    let timerHandle, seconds = 0;
+    let localStream, peerConnection, callChannel;
+
+    const rtcConfig = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    };
+
+    async function startCall() {
+      // STRICT GATEWAY CHECK: Prevent accidental or asynchronous race conditions
+      if (!isSessionAuthorized) {
+        log('Security Violation: Call initiation rejected without active authorization.', 'warn');
+        showScreen('screen-otp');
+        return;
+      }
+
+      showScreen('screen-call');
+      log(`Subscribing to safe channel stream: room_${roomId}…`);
+
+      // Local Media Capture initialization
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        document.getElementById('localVideo').srcObject = localStream;
+        log('Local camera array mounted.', 'ok');
+      } catch (e) {
+        log('Hardware permission error.', 'warn');
+        return;
+      }
+
+      // Initialize WebRTC Pipeline Architecture
+      peerConnection = new RTCPeerConnection(rtcConfig);
+      localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+      const remoteStream = new MediaStream();
+      document.getElementById('remoteVideo').srcObject = remoteStream;
+
+      peerConnection.ontrack = (event) => {
+        log('Remote signal sync stream connected.', 'ok');
+        event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
+      };
+
+      // Connect to Supabase Secure Realtime Stream
+      callChannel = supabaseClient.channel(`room_${roomId}`, {
+        config: { broadcast: { self: false } }
+      });
+
+      // Local ICE Candidate Dispatch
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate && isSessionAuthorized) {
+          callChannel.send({
+            type: 'broadcast',
+            event: 'candidate',
+            payload: {
+              sender: 'web',
+              candidate: {
+                sdpMid: event.candidate.sdpMid,
+                sdpMLineIndex: event.candidate.sdpMLineIndex,
+                candidate: event.candidate.candidate
+              }
+            }
+          });
+        }
+      };
+
+      // Process inbound signals only under absolute validation constraints
+      callChannel
+        .on('broadcast', { event: 'offer' }, async ({ payload }) => {
+          if (payload.sender === 'android' && !peerConnection.currentRemoteDescription && isSessionAuthorized) {
+            log('Android offer matrix captured. Executing handshake layers…');
+
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.offer));
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+
+            callChannel.send({
+              type: 'broadcast',
+              event: 'answer',
+              payload: {
+                sender: 'web',
+                answer: { type: answer.type, sdp: answer.sdp }
+              }
+            });
+            log('Answer session matrix returned to cell host.', 'ok');
+          }
+        })
+        .on('broadcast', { event: 'candidate' }, async ({ payload }) => {
+          if (payload.sender === 'android' && peerConnection.currentRemoteDescription && isSessionAuthorized) {
+            try {
+              await peerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+            } catch (e) {
+              console.error("Signal insertion failure", e);
+            }
+          }
+        })
+        .on('broadcast', { event: 'hangup' }, async ({ payload }) => {
+          if (payload.sender === 'android') {
+            log('Android ended the call.', 'warn');
+            clearInterval(timerHandle);
+            if (localStream) localStream.getTracks().forEach(t => t.stop());
+            if (peerConnection) peerConnection.close();
+            if (callChannel) {
+              supabaseClient.removeChannel(callChannel);
+            }
+            document.querySelector('.call-meta').innerHTML = '<div class="timer">Call ended</div>';
+          }
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED' && isSessionAuthorized) {
+            log('Security channel active. Requesting connection from node.', 'ok');
+            callChannel.send({
+              type: 'broadcast',
+              event: 'web-ready',
+              payload: { sender: 'web' }
+            });
+          }
+        });
+
+      // Call timer initialization
+      timerHandle = setInterval(() => {
+        seconds++;
+        const m = String(Math.floor(seconds / 60)).padStart(2, '0');
+        const s = String(seconds % 60).padStart(2, '0');
+        document.getElementById('callTimer').textContent = `${m}:${s}`;
+      }, 1000);
+    }
+
+    /* ======================================================================
+        5. CALL TEARDOWN MANAGEMENT
+       ====================================================================== */
+    document.getElementById('hangupBtn').addEventListener('click', async () => {
+      clearInterval(timerHandle);
+      isSessionAuthorized = false; // Destroy authorization flag immediately on exit
+
+      if (localStream) localStream.getTracks().forEach(t => t.stop());
+      if (peerConnection) peerConnection.close();
+
+      if (callChannel) {
+        callChannel.send({
+          type: 'broadcast',
+          event: 'hangup',
+          payload: { sender: 'web' }
+        });
+        supabaseClient.removeChannel(callChannel);
+      }
+
+      // Optional: Update Database status map
+      try {
+        await supabaseClient
+          .from('call_sessions')
+          .update({ status: 'DISCONNECTED' })
+          .eq('room_id', roomId);
+      } catch(e){}
+
+      log('Media pipeline completely unmounted.', 'warn');
+      document.querySelector('.call-meta').innerHTML = '<div class="timer">Call ended</div>';
+    });
+</script>
+
+</body>
+</html>

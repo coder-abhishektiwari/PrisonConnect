@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="content_max_width">1000dp</dimen> <!-- Effectively no limit on phones -->
+    <dimen name="login_max_width">1000dp</dimen>
+    <dimen name="local_view_width">120dp</dimen>
+    <dimen name="local_view_height">160dp</dimen>
+    <dimen name="card_margin">24dp</dimen>
+</resources>

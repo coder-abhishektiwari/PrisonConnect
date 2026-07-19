@@ -1,0 +1,6 @@
+- [ ] Update resources (dimens, integers) for adaptive layout
+- [ ] Improve DashboardFragment layout for tablets
+- [ ] Improve CallRoomFragment layout for tablets
+- [ ] Improve LoginFragment layout for tablets
+- [ ] Update DashboardFragment.kt for grid layout
+- [ ] Verify build
