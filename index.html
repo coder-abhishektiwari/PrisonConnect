@@ -240,21 +240,29 @@
 
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    // Handle routing segments (/join/$roomId)
-    let roomId = 'ROOM-88213';
-    const pathSegments = window.location.pathname.split('/').filter(segment => segment.length > 0);
-    
-    // Check if URL contains /join/ROOM_ID pattern
-    const joinIndex = pathSegments.indexOf('join');
-    if (joinIndex !== -1 && pathSegments.length > joinIndex + 1) {
-      roomId = pathSegments[joinIndex + 1];
-    } else if (pathSegments.length > 0 && pathSegments[0] !== 'join') {
-      // If last segment doesn't look like 'join', use it as roomId
-      roomId = pathSegments[pathSegments.length - 1];
-    }
-
+    // Handle routing - room ID comes from query parameter ?room=ROOM_ID
+    let roomId = '';
     const params = new URLSearchParams(location.search);
+    
+    // Check for room in query parameters (from .htaccess rewrite)
+    roomId = params.get('room') || '';
+    
+    // If not in query params, try to get from URL path
+    if (!roomId) {
+      const pathSegments = window.location.pathname.split('/').filter(segment => segment.length > 0);
+      const joinIndex = pathSegments.indexOf('join');
+      if (joinIndex !== -1 && pathSegments.length > joinIndex + 1) {
+        roomId = pathSegments[joinIndex + 1];
+      } else if (pathSegments.length > 0) {
+        roomId = pathSegments[pathSegments.length - 1];
+      }
+    }
+    
     const token = params.get('token') || '';
+    
+    if (!roomId) {
+      log('ERROR: No room ID found in URL. Expected format: index.html?room=ROOM_ID', 'warn');
+    }
 
     document.getElementById('roomText').textContent = `Room ${roomId}`;
     document.getElementById('landingMeta').textContent = `token: ${token} · Authenticating Layer`;
@@ -312,17 +320,95 @@
 
     // Master Execution Flow on Init
     (async function initLanding() {
-      const autoConnected = await verifySessionToken(token, roomId);
-
-      if (autoConnected) {
-        log('Token pre-verified by system. Joining call...', 'ok');
-        isSessionAuthorized = true;
-        startCall();
-      } else {
-        log('Auto-handshake failed. Redirecting to OTP authentication gateway.', 'warn');
-        showScreen('screen-otp');
-        document.querySelectorAll('#otpInputs input')[0]?.focus();
+      log(`Looking up room: ${roomId}`, 'ok');
+      
+      // Fetch room details including kiosk_id (retry up to 5 times)
+      let roomData = null;
+      const maxRetries = 5;
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          log(`Attempt ${attempt}/${maxRetries}: Querying database...`, 'ok');
+          
+          const { data, error } = await supabaseClient
+            .from('call_rooms')
+            .select('kiosk_id, room_status, token')
+            .eq('room_id', roomId)
+            .maybeSingle();
+          
+          if (error) {
+            log(`Database error: ${error.message}`, 'warn');
+          }
+          
+          if (data) {
+            roomData = data;
+            log(`✓ Connected to kiosk: ${data.kiosk_id || 'Unknown'}`, 'ok');
+            break;
+          }
+          
+          if (attempt < maxRetries) {
+            log(`Room not found yet, retrying in 2 seconds...`, 'warn');
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        } catch (e) {
+          log(`Exception on attempt ${attempt}: ${e.message}`, 'warn');
+          if (attempt < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        }
       }
+      
+      if (!roomData) {
+        log('✗ Room not found after retries. The link may be invalid or the room hasn\'t been created yet.', 'warn');
+        log('Please check: 1) Room ID is correct, 2) Android app has created the room, 3) Internet connection', 'warn');
+        return;
+      }
+      
+      // Notify kiosk that link was opened
+      try {
+        const notifyChannel = supabaseClient.channel(`room_${roomId}`, {
+          config: { broadcast: { self: false } }
+        });
+        
+        await new Promise((resolve) => {
+          notifyChannel.subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+              notifyChannel.send({
+                type: 'broadcast',
+                event: 'site-opened',
+                payload: { 
+                  sender: 'web',
+                  kiosk_id: roomData?.kiosk_id || 'unknown',
+                  timestamp: new Date().toISOString()
+                }
+              });
+              setTimeout(() => {
+                supabaseClient.removeChannel(notifyChannel);
+                resolve(true);
+              }, 500);
+            }
+          });
+        });
+        
+        log('Kiosk notified that link was opened.', 'ok');
+      } catch (e) {
+        log('Failed to notify kiosk: ' + e.message, 'warn');
+      }
+      
+      // Update room status to OTP_SENT to trigger Android to send OTP SMS
+      try {
+        await supabaseClient
+          .from('call_rooms')
+          .update({ room_status: 'OTP_SENT' })
+          .eq('room_id', roomId);
+        log('Requesting access code...', 'ok');
+      } catch (e) {
+        log('Failed to request access code.', 'warn');
+      }
+      
+      // SECURITY: Always require OTP verification
+      log('Initializing secure authentication gateway...', 'ok');
+      showScreen('screen-otp');
+      document.querySelectorAll('#otpInputs input')[0]?.focus();
     })();
 
     /* ======================================================================
@@ -364,6 +450,13 @@
       if (otpSuccess) {
         log('OTP tokens authenticated.', 'ok');
         isSessionAuthorized = true;
+        
+        // Notify kiosk that OTP was verified
+        await notifyKioskOtpVerified();
+        
+        // Notify Android that web client has joined
+        await notifyAndroidJoined();
+        
         startCall();
       } else {
         errEl.textContent = 'Incorrect code. Please try again.';
@@ -379,6 +472,7 @@
        ====================================================================== */
     let timerHandle, seconds = 0;
     let localStream, peerConnection, callChannel;
+    let hasNotifiedAndroid = false;
 
     const rtcConfig = {
       iceServers: [
@@ -386,6 +480,69 @@
         { urls: 'stun:stun1.l.google.com:19302' }
       ]
     };
+
+    async function notifyKioskOtpVerified() {
+      try {
+        const notifyChannel = supabaseClient.channel(`room_${roomId}`, {
+          config: { broadcast: { self: false } }
+        });
+        
+        await new Promise((resolve) => {
+          notifyChannel.subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+              notifyChannel.send({
+                type: 'broadcast',
+                event: 'otp-verified',
+                payload: { 
+                  sender: 'web',
+                  timestamp: new Date().toISOString()
+                }
+              });
+              setTimeout(() => {
+                supabaseClient.removeChannel(notifyChannel);
+                resolve(true);
+              }, 500);
+            }
+          });
+        });
+        
+        log('Kiosk notified of OTP verification.', 'ok');
+      } catch (e) {
+        log('Failed to notify kiosk of OTP: ' + e.message, 'warn');
+      }
+    }
+    
+    async function notifyAndroidJoined() {
+      if (hasNotifiedAndroid) return;
+      hasNotifiedAndroid = true;
+      
+      try {
+        // Create temporary channel to send web-joined event
+        const notifyChannel = supabaseClient.channel(`room_${roomId}`, {
+          config: { broadcast: { self: false } }
+        });
+        
+        await new Promise((resolve) => {
+          notifyChannel.subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+              notifyChannel.send({
+                type: 'broadcast',
+                event: 'web-joined',
+                payload: { sender: 'web' }
+              });
+              setTimeout(() => {
+                supabaseClient.removeChannel(notifyChannel);
+                resolve(true);
+              }, 500);
+            }
+          });
+        });
+        
+        log('Android notified of web client join.', 'ok');
+      } catch (e) {
+        log('Failed to notify Android: ' + e.message, 'warn');
+      }
+    }
 
     async function startCall() {
       // STRICT GATEWAY CHECK: Prevent accidental or asynchronous race conditions
@@ -410,14 +567,22 @@
 
       // Initialize WebRTC Pipeline Architecture
       peerConnection = new RTCPeerConnection(rtcConfig);
-      localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+      
+      // Add tracks to peer connection
+      localStream.getTracks().forEach(track => {
+        log(`Adding ${track.kind} track to peer connection`, 'ok');
+        peerConnection.addTrack(track, localStream);
+      });
 
       const remoteStream = new MediaStream();
       document.getElementById('remoteVideo').srcObject = remoteStream;
 
       peerConnection.ontrack = (event) => {
-        log('Remote signal sync stream connected.', 'ok');
-        event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
+        log(`Remote ${event.track.kind} track received`, 'ok');
+        event.streams[0].getTracks().forEach(track => {
+          log(`Adding remote ${track.kind} track to remote stream`, 'ok');
+          remoteStream.addTrack(track);
+        });
       };
 
       // Connect to Supabase Secure Realtime Stream
@@ -425,21 +590,44 @@
         config: { broadcast: { self: false } }
       });
 
-      // Local ICE Candidate Dispatch
+      // Local ICE Candidate Dispatch - Batch candidates to avoid rate limits
+      let pendingCandidates = [];
+      let candidateBatchTimeout = null;
+      
       peerConnection.onicecandidate = (event) => {
         if (event.candidate && isSessionAuthorized) {
-          callChannel.send({
-            type: 'broadcast',
-            event: 'candidate',
-            payload: {
-              sender: 'web',
-              candidate: {
-                sdpMid: event.candidate.sdpMid,
-                sdpMLineIndex: event.candidate.sdpMLineIndex,
-                candidate: event.candidate.candidate
-              }
-            }
+          // Add to batch
+          pendingCandidates.push({
+            sdpMid: event.candidate.sdpMid,
+            sdpMLineIndex: event.candidate.sdpMLineIndex,
+            candidate: event.candidate.candidate
           });
+          
+          log(`ICE candidate queued (${pendingCandidates.length} pending)`, 'ok');
+          
+          // Clear previous timeout
+          if (candidateBatchTimeout) {
+            clearTimeout(candidateBatchTimeout);
+          }
+          
+          // Send batch after 100ms delay
+          candidateBatchTimeout = setTimeout(() => {
+            if (pendingCandidates.length > 0) {
+              const candidatesToSend = [...pendingCandidates];
+              pendingCandidates = [];
+              
+              callChannel.send({
+                type: 'broadcast',
+                event: 'candidates-batch',
+                payload: {
+                  sender: 'web',
+                  candidates: candidatesToSend
+                }
+              });
+              
+              log(`Sent ${candidatesToSend.length} ICE candidates via Realtime`, 'ok');
+            }
+          }, 100);
         }
       };
 
@@ -464,10 +652,15 @@
             log('Answer session matrix returned to cell host.', 'ok');
           }
         })
-        .on('broadcast', { event: 'candidate' }, async ({ payload }) => {
+        .on('broadcast', { event: 'candidates-batch' }, async ({ payload }) => {
           if (payload.sender === 'android' && peerConnection.currentRemoteDescription && isSessionAuthorized) {
             try {
-              await peerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+              const candidates = payload.candidates || [];
+              log(`Received ${candidates.length} candidates from Android`, 'ok');
+              
+              for (const candidateData of candidates) {
+                await peerConnection.addIceCandidate(new RTCIceCandidate(candidateData));
+              }
             } catch (e) {
               console.error("Signal insertion failure", e);
             }

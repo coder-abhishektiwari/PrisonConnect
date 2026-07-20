@@ -158,6 +158,7 @@ class DashboardFragment : Fragment() {
             putString("call_type", type)
             putString("user_id", userId)
             putString("phone_number", contact.phone_number)
+            putString("inmate_name", contact.full_name ?: "Inmate")
         }
         val fragment = CallRoomFragment().apply {
             arguments = bundle
