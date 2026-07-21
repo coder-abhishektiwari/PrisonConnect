@@ -14,5 +14,5 @@ data class Contact(
     @SerialName("phone_number")
     val phone_number: String = "",
     @SerialName("relationship_type")
-    val relationship_type: String = "" // "FAMILY", "LAWYER", "FACILITY_EMERGENCY"
+    val relationship_type: String = ""
 )

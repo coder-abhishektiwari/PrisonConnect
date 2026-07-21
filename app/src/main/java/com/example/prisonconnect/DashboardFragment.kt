@@ -2,6 +2,7 @@ package com.example.prisonconnect
 
 import android.content.Context
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -30,6 +31,7 @@ class DashboardFragment : Fragment() {
     private var userId: String? = null
     private var balancePollJob: Job? = null
     private var inmateName: String = "Inmate"
+    private var jailName: String = "jail"
 
     private lateinit var contactAdapter: ContactAdapter
 
@@ -114,6 +116,7 @@ class DashboardFragment : Fragment() {
             putString("user_id", userId)
             putString("phone_number", fullPhone)
             putString("inmate_name", inmateName)
+            putString("jail_name", jailName)
         }
         val fragment = CallRoomFragment().apply {
             arguments = bundle
@@ -164,6 +167,7 @@ class DashboardFragment : Fragment() {
                     val user: User? = DbService.getDocument(table = "users", id = id)
                     if (_binding != null && user != null) {
                         inmateName = user.full_name
+                        jailName = user.jail_name
                         currentBinding.tvInmateName.text = user.full_name
                     }
                 } catch (_: Exception) {
@@ -219,10 +223,13 @@ class DashboardFragment : Fragment() {
         val seconds = user.balance_remaining_seconds
         binding.tvBalanceValue.text = formatBalance(seconds)
 
-        // Progress bar: assume 30 mins max (1800 seconds)
-        val maxSeconds = 1800L
+        // Progress bar: Use a larger scale, e.g., 24 hours (36000 seconds)
+        // or dynamic based on initial balance. For now, 10 hours.
+        val maxSeconds = 36000L
         binding.pbBalance.max = maxSeconds.toInt()
-        binding.pbBalance.progress = seconds.toInt().coerceAtMost(maxSeconds.toInt())
+        binding.pbBalance.progress = seconds.toInt().coerceIn(0, maxSeconds.toInt())
+        
+        Log.d("Dashboard abhishek", "Balance UI updated: $seconds seconds")
     }
 
     private fun formatBalance(seconds: Long): String {
@@ -235,12 +242,18 @@ class DashboardFragment : Fragment() {
     }
 
     private fun navigateToCall(contact: Contact, type: String) {
+        if (userId == null) {
+            Toast.makeText(context, "Error: User ID not found", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
         val bundle = Bundle().apply {
             putString("contact_id", contact.contact_id)
             putString("call_type", type)
             putString("user_id", userId)
             putString("phone_number", contact.phone_number)
-            putString("inmate_name", contact.full_name ?: "Inmate")
+            putString("inmate_name", inmateName) // Prisoner Name from users table
+            putString("jail_name", jailName)     // Jail Name from users table
         }
         val fragment = CallRoomFragment().apply {
             arguments = bundle

@@ -16,5 +16,7 @@ data class User(
     @SerialName("account_status")
     val account_status: String = "",
     @SerialName("prisoner_id")
-    val prisoner_id: String = ""
+    val prisoner_id: String = "",
+    @SerialName("jail_name")
+    val jail_name: String = ""
 )

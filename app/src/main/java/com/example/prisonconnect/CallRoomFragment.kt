@@ -39,6 +39,7 @@ class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClie
     private var roomToken: String = ""
     private var inmateId: String = ""
     private var inmateName: String = ""
+    private var jailName: String = ""
 
     private lateinit var smsController: SmsController
     private lateinit var webRtcManager: WebRtcManager
@@ -120,6 +121,7 @@ class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClie
         val callType = arguments?.getString("call_type") ?: "VIDEO"
         inmateId = arguments?.getString("user_id") ?: "INMATE_001"
         inmateName = arguments?.getString("inmate_name") ?: arguments?.getString("full_name") ?: "Inmate"
+        jailName = arguments?.getString("jail_name") ?: "jail"
         roomId = arguments?.getString("room_id") ?: "ROOM_${System.currentTimeMillis()}"
         contactPhone = arguments?.getString("phone_number") ?: ""
 
@@ -291,9 +293,11 @@ class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClie
                                 runPreCallDiagnostic()
                             }
                             "CONNECTED" -> {
-                                currentRoomState = RoomState.CONNECTED
-                                showLobby(binding, "✅ Call connected!")
-                                startCallTimer()
+                                if (currentRoomState != RoomState.CONNECTED) {
+                                    currentRoomState = RoomState.CONNECTED
+                                    showCallUi(binding)
+                                    startCallTimer()
+                                }
                             }
                             "DISCONNECTED", "TAMPER_KILLED" -> teardownAndExit()
                             else -> showLobby(binding, "Waiting for terminal response...")
@@ -357,7 +361,7 @@ class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClie
                 if (!isLinkSent && targetPhone.isNotBlank()) {
                     isLinkSent = true
                     val smsLink = "https://prisonconnect-call.rf.gd/index.html?room=$roomId&token=$roomToken"
-                    val linkMessage = "PrisonConnect: You have a video call request from Inmate: $inmateName at $kioskId. Join: $smsLink"
+                    val linkMessage = "PrisonConnect: You have a video call request from Inmate: $inmateName at $jailName. Join: $smsLink"
                     Log.d("CallRoom abhishek", "Sending SMS link via Supabase to: $targetPhone")
                     
                     val result = smsController.sendSmsViaSupabase(targetPhone, linkMessage)
