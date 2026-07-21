@@ -1,6 +1,7 @@
 package com.example.prisonconnect
 
 import android.os.Bundle
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
@@ -23,6 +24,19 @@ class KioskMainActivity : AppCompatActivity() {
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
             insets
         }
+
+        // Setup OnBackPressedDispatcher
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                val currentFragment = supportFragmentManager.findFragmentById(R.id.fragment_container)
+                if (currentFragment is LoginFragment) {
+                    finishAffinity() // Exit the app completely
+                } else {
+                    // Otherwise, go back to login (which will show PIN if user is logged in)
+                    navigateToFragment(LoginFragment(), false)
+                }
+            }
+        })
 
         if (savedInstanceState == null) {
             navigateToFragment(LoginFragment(), false)

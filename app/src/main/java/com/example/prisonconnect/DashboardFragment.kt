@@ -1,5 +1,6 @@
 package com.example.prisonconnect
 
+import android.content.Context
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -17,6 +18,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+import android.widget.ArrayAdapter
+import com.google.android.material.bottomsheet.BottomSheetDialog
+import com.example.prisonconnect.databinding.DialogDialerBinding
+
 class DashboardFragment : Fragment() {
 
     private var _binding: FragmentDashboardBinding? = null
@@ -24,6 +29,7 @@ class DashboardFragment : Fragment() {
 
     private var userId: String? = null
     private var balancePollJob: Job? = null
+    private var inmateName: String = "Inmate"
 
     private lateinit var contactAdapter: ContactAdapter
 
@@ -49,13 +55,74 @@ class DashboardFragment : Fragment() {
         fetchContacts()
         startBalancePolling()
 
-        binding.btnLogout.setOnClickListener {
-            balancePollJob?.cancel()
-            (activity as? KioskMainActivity)?.navigateToFragment(LoginFragment(), false)
+        val binding = _binding
+        if (binding != null) {
+            // Logout button - just shows PIN screen (kiosk is fixed to one prisoner)
+            binding.btnLogout.setOnClickListener {
+                balancePollJob?.cancel()
+                // Go to LoginFragment which will show PIN screen (not prisoner ID)
+                (activity as? KioskMainActivity)?.navigateToFragment(LoginFragment(), false)
+            }
+
+            binding.fabDialer.setOnClickListener {
+                showDialerDialog()
+            }
         }
     }
 
+    private fun showDialerDialog() {
+        val dialog = BottomSheetDialog(requireContext())
+        val dialogBinding = DialogDialerBinding.inflate(layoutInflater)
+        dialog.setContentView(dialogBinding.root)
+
+        // Setup Country Code Picker
+        val codes = listOf("+91", "+1", "+44", "+971", "+966")
+        val adapter = ArrayAdapter(requireContext(), R.layout.dropdown_item, codes)
+        dialogBinding.actCountryCode.setAdapter(adapter)
+
+        dialogBinding.btnAudioCall.setOnClickListener {
+            val phone = dialogBinding.etPhoneNumber.text?.toString()
+            val code = dialogBinding.actCountryCode.text.toString()
+            if (validatePhone(phone)) {
+                dialog.dismiss()
+                navigateToManualCall("$code$phone", "AUDIO")
+            }
+        }
+
+        dialogBinding.btnVideoCall.setOnClickListener {
+            val phone = dialogBinding.etPhoneNumber.text?.toString()
+            val code = dialogBinding.actCountryCode.text.toString()
+            if (validatePhone(phone)) {
+                dialog.dismiss()
+                navigateToManualCall("$code$phone", "VIDEO")
+            }
+        }
+
+        dialog.show()
+    }
+
+    private fun validatePhone(phone: String?): Boolean {
+        return if (phone.isNullOrBlank() || phone.length < 10) {
+            Toast.makeText(context, "Please enter a valid 10-digit number", Toast.LENGTH_SHORT).show()
+            false
+        } else true
+    }
+
+    private fun navigateToManualCall(fullPhone: String, type: String) {
+        val bundle = Bundle().apply {
+            putString("call_type", type)
+            putString("user_id", userId)
+            putString("phone_number", fullPhone)
+            putString("inmate_name", inmateName)
+        }
+        val fragment = CallRoomFragment().apply {
+            arguments = bundle
+        }
+        (activity as? KioskMainActivity)?.navigateToFragment(fragment)
+    }
+
     private fun setupRecyclerView() {
+        val binding = _binding ?: return
         contactAdapter = ContactAdapter(emptyList(),
             onAudioCall = { contact -> navigateToCall(contact, "AUDIO") },
             onVideoCall = { contact -> navigateToCall(contact, "VIDEO") }
@@ -73,11 +140,11 @@ class DashboardFragment : Fragment() {
 
     private fun startBalancePolling() {
         val id = userId ?: return
-        balancePollJob = lifecycleScope.launch {
+        balancePollJob = viewLifecycleOwner.lifecycleScope.launch {
             while (isActive) {
                 try {
                     val user: User? = DbService.getDocument(table = "users", id = id)
-                    if (user != null) {
+                    if (user != null && _binding != null) {
                         updateBalanceUI(user)
                     }
                 } catch (_: Exception) {
@@ -89,21 +156,31 @@ class DashboardFragment : Fragment() {
     }
 
     private fun fetchInmateData() {
+        val binding = _binding ?: return
+        val currentBinding = binding
         userId?.let { id ->
-            lifecycleScope.launch {
+            viewLifecycleOwner.lifecycleScope.launch {
                 try {
                     val user: User? = DbService.getDocument(table = "users", id = id)
-                    binding.tvInmateName.text = user?.full_name ?: "Inmate"
+                    if (_binding != null && user != null) {
+                        inmateName = user.full_name
+                        currentBinding.tvInmateName.text = user.full_name
+                    }
                 } catch (_: Exception) {
-                    binding.tvInmateName.text = "Inmate"
+                    if (_binding != null) {
+                        currentBinding.tvInmateName.text = "Inmate"
+                    }
                 }
             }
         }
     }
 
     private fun fetchContacts() {
+        val binding = _binding
+        if (binding == null) return
+        
         userId?.let { id ->
-            lifecycleScope.launch {
+            viewLifecycleOwner.lifecycleScope.launch {
                 try {
                     val contacts: List<Contact> = DbService.queryDocuments(
                         table = "contacts",
@@ -121,19 +198,24 @@ class DashboardFragment : Fragment() {
                         contactAdapter.updateContacts(contacts)
                     }
                 } catch (e: Exception) {
-                    binding.rvContacts.visibility = View.GONE
-                    binding.tvEmptyState.visibility = View.VISIBLE
-                    binding.tvEmptyState.text = "Failed to load contacts. Please try again."
+                    if (_binding != null) {
+                        binding.rvContacts.visibility = View.GONE
+                        binding.tvEmptyState.visibility = View.VISIBLE
+                        binding.tvEmptyState.text = "Failed to load contacts. Please try again."
+                    }
                 }
             }
         } ?: run {
-            binding.rvContacts.visibility = View.GONE
-            binding.tvEmptyState.visibility = View.VISIBLE
-            binding.tvEmptyState.text = "No contacts added for you"
+            if (_binding != null) {
+                binding.rvContacts.visibility = View.GONE
+                binding.tvEmptyState.visibility = View.VISIBLE
+                binding.tvEmptyState.text = "No contacts added for you"
+            }
         }
     }
 
     private fun updateBalanceUI(user: User) {
+        val binding = _binding ?: return
         val seconds = user.balance_remaining_seconds
         binding.tvBalanceValue.text = formatBalance(seconds)
 

@@ -5,43 +5,28 @@ import android.content.*
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.IBinder
-import android.telephony.SmsManager
 import android.util.Log
-import android.view.LayoutInflater
-import android.view.View
-import android.view.ViewGroup
-import android.app.PendingIntent
-import android.content.Intent
+import android.view.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
-import com.example.prisonconnect.config.SupabaseConfig
 import com.example.prisonconnect.databinding.FragmentCallRoomBinding
 import com.example.prisonconnect.model.CallRoom
 import com.example.prisonconnect.repository.DbService
-import io.github.jan.supabase.realtime.RealtimeChannel
-import io.github.jan.supabase.realtime.broadcastFlow
-import io.github.jan.supabase.realtime.channel
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonObject
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonNull
+import com.example.prisonconnect.webrtc.SignalingClient
+import com.example.prisonconnect.webrtc.SmsController
+import com.example.prisonconnect.webrtc.WebRtcManager
+import kotlinx.coroutines.*
+import kotlinx.serialization.json.*
 import org.webrtc.*
 import java.util.*
 
-class CallRoomFragment : Fragment() {
+import com.example.prisonconnect.model.User
+import com.example.prisonconnect.databinding.DialogCallSummaryBinding
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+
+class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClient.SignalingListener {
 
     private var _binding: FragmentCallRoomBinding? = null
     private val binding get() = _binding!!
@@ -55,29 +40,39 @@ class CallRoomFragment : Fragment() {
     private var inmateId: String = ""
     private var inmateName: String = ""
 
-    private var peerConnection: PeerConnection? = null
-    private var factory: PeerConnectionFactory? = null
-    private var localVideoTrack: VideoTrack? = null
-    private var localAudioTrack: AudioTrack? = null
-    private var videoCapturer: VideoCapturer? = null
+    private lateinit var smsController: SmsController
+    private lateinit var webRtcManager: WebRtcManager
+    private lateinit var diagnosticHelper: com.example.prisonconnect.webrtc.CallDiagnosticHelper
+    private var signalingClient: SignalingClient? = null
 
     private var recordingService: SecureHardwareRecordingService? = null
     private var isServiceBound = false
     private var roomPollJob: Job? = null
-    private var signalingPollJob: Job? = null
     private var smsJob: Job? = null
-    private var realtimeChannel: RealtimeChannel? = null
+    private var timerJob: Job? = null
     private var isCallStarted = false
+    private var isOtpSent = false
     private var currentRoomState = RoomState.UNKNOWN
-    private var hasSmsPermission = false
-    private var hasCameraAudioPermission = false
-    private var smsSentReceiver: BroadcastReceiver? = null
-    private var smsDeliveredReceiver: BroadcastReceiver? = null
-    private var pendingCandidates = mutableListOf<IceCandidate>()
-    private var candidateBatchJob: Job? = null
     private var isRemoteDescriptionSet = false
+    private val localCandidatesQueue = mutableListOf<IceCandidate>()
+    private val remoteCandidatesQueue = mutableListOf<IceCandidate>()
+    private var candidateBatchJob: Job? = null
+    private var remoteVideoTrack: VideoTrack? = null
+    
+    // Call Timer & Balance
+    private var elapsedSeconds = 0L
+    private var remainingBalanceSeconds = 0L
+    private var initialBalanceSeconds = 0L
+
+    // Queue for web-ready event if it arrives before peer connection is ready
+    private var pendingWebReady = false
+    private var connectTimeoutJob: Job? = null
 
     private val eglBase = EglBase.create()
+
+    private enum class RoomState {
+        WAITING, OTP_SENT, ACTIVE, CONNECTED, DISCONNECTED, TAMPER_KILLED, UNKNOWN
+    }
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -85,65 +80,42 @@ class CallRoomFragment : Fragment() {
             recordingService = binder.getService()
             isServiceBound = true
         }
-
         override fun onServiceDisconnected(name: ComponentName?) {
             isServiceBound = false
         }
     }
 
-    private val permissionLauncher = registerForActivityResult(
+    private val diagnosticLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        hasCameraAudioPermission = permissions[Manifest.permission.CAMERA] == true &&
-                permissions[Manifest.permission.RECORD_AUDIO] == true
-        hasSmsPermission = permissions[Manifest.permission.SEND_SMS] == true
-
-        Log.d("CallRoom", "permissionLauncher: cameraAudio=$hasCameraAudioPermission sms=$hasSmsPermission")
-
-        // If SMS permission granted and room is waiting, start SMS loop
-        if (hasSmsPermission && currentRoomState == RoomState.WAITING && smsJob?.isActive != true) {
-            lifecycleScope.launch {
-                try {
-                    val receiverPhone = roomId?.let { 
-                        val room = DbService.getDocumentByColumn<CallRoom>("call_rooms", "room_id", it)
-                        room?.receiver_phone ?: room?.receiverPhone
-                    }
-                    if (!receiverPhone.isNullOrBlank()) {
-                        Log.d("CallRoom", "Starting SMS loop after permission granted")
-                        startSmsLoop(receiverPhone)
-                    }
-                } catch (e: Exception) {
-                    Log.e("CallRoom", "Failed to get receiver phone", e)
-                }
-            }
-        }
-
-        if (currentRoomState == RoomState.ACTIVE && !isCallStarted && hasCameraAudioPermission) {
-            activateCallSession()
+    ) { results ->
+        val allGranted = results.values.all { it }
+        if (allGranted) {
+            // Re-run diagnostic to proceed
+            runPreCallDiagnostic()
+        } else {
+            showLobby(binding, "❌ Permissions denied. Cannot proceed with the call.")
         }
     }
 
-    private enum class RoomState {
-        WAITING,
-        OTP_SENT,
-        ACTIVE,
-        CONNECTED,
-        DISCONNECTED,
-        TAMPER_KILLED,
-        UNKNOWN
-    }
-
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?
-    ): View {
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentCallRoomBinding.inflate(inflater, container, false)
         return binding.root
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        
+        val binding = _binding ?: return
+        
+        smsController = SmsController()
+        webRtcManager = WebRtcManager(requireContext(), eglBase, this)
+        diagnosticHelper = com.example.prisonconnect.webrtc.CallDiagnosticHelper(this)
+        
+        // Offload heavy WebRTC initialization to background
+        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.Default) {
+            webRtcManager.initialize()
+            Log.d("CallRoom abhishek", "WebRtcManager initialized in background")
+        }
 
         val callType = arguments?.getString("call_type") ?: "VIDEO"
         inmateId = arguments?.getString("user_id") ?: "INMATE_001"
@@ -151,30 +123,85 @@ class CallRoomFragment : Fragment() {
         roomId = arguments?.getString("room_id") ?: "ROOM_${System.currentTimeMillis()}"
         contactPhone = arguments?.getString("phone_number") ?: ""
 
-        Log.d("CallRoom", "onViewCreated: roomId=$roomId callType=$callType inmateId=$inmateId inmateName=$inmateName contactPhone=$contactPhone")
+        Log.d("CallRoom abhishek", "onViewCreated - roomId: $roomId, contactPhone: $contactPhone, inmateName: $inmateName")
 
-        initializeLobbyUi()
-        // First create the room, then start observing
-        lifecycleScope.launch {
-            // Wait for room to be created
+        initializeLobbyUi(binding)
+        binding.timerOverlay.visibility = View.GONE
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            // Fetch inmate balance
+            val user = DbService.getDocument<User>("users", inmateId)
+            initialBalanceSeconds = user?.balance_remaining_seconds ?: 0L
+            remainingBalanceSeconds = initialBalanceSeconds
+
             initializeRoom(inmateId, callType)
             
-            // Verify room was created before proceeding
-            delay(1000) // Give database time to sync
-            val room = DbService.getDocumentByColumn<CallRoom>("call_rooms", "room_id", roomId.toString())
+            // Wait for room to be created and verify
+            var room: CallRoom? = null
+            for (i in 1..5) {
+                delay(1000)
+                if (_binding == null) return@launch
+                room = DbService.getDocumentByColumn<CallRoom>("call_rooms", "room_id", roomId.toString())
+                if (room != null) {
+                    Log.d("CallRoom abhishek", "Room found after $i seconds - receiver_phone: ${room.receiver_phone}, receiverPhone: ${room.receiverPhone}")
+                    break
+                }
+            }
+            
+            if (_binding == null) return@launch
             if (room == null) {
-                Log.e("CallRoom", "Room not found after creation: $roomId")
-                showLobby("❌ Error: Room not created. Please try again.")
+                showLobby(binding, "❌ Error: Room not created. Please try again.")
                 return@launch
             }
             
-            Log.d("CallRoom", "Room verified in database: $roomId")
-            requestInitialPermissions()
+            // SignalingClient connected early for room
+            signalingClient = SignalingClient(roomId!!, viewLifecycleOwner.lifecycleScope, this@CallRoomFragment)
+            signalingClient?.connect()
+            Log.d("CallRoom abhishek", "SignalingClient connected for room: $roomId")
+            
+            runPreCallDiagnostic()
+            
+            val receiverPhone = room.receiver_phone ?: room.receiverPhone
+            if (!receiverPhone.isNullOrBlank()) {
+                startSmsLoop(receiverPhone)
+            }
             observeRoomStatus()
         }
     }
 
-    private fun initializeLobbyUi() {
+    private fun runPreCallDiagnostic() {
+        val binding = _binding ?: return
+        val result = diagnosticHelper.performFullDiagnostic(isVideo = true)
+        val plan = diagnosticHelper.getResolutionPlan(result, diagnosticLauncher)
+
+        if (result == com.example.prisonconnect.webrtc.CallDiagnosticHelper.DiagnosticResult.Success) {
+            if (currentRoomState == RoomState.ACTIVE && !isCallStarted) {
+                activateCallSession()
+            }
+        } else {
+            showLobby(binding, "⚠️ ${plan.message}")
+            if (plan.actionLabel != null && plan.action != null) {
+                binding.btnCancelCall.text = plan.actionLabel
+                binding.btnCancelCall.setOnClickListener { plan.action.invoke() }
+            }
+        }
+    }
+
+    private fun checkAndStartSms() {
+        if (currentRoomState == RoomState.WAITING && smsJob?.isActive != true) {
+            viewLifecycleOwner.lifecycleScope.launch {
+                val room = roomId?.let { 
+                    DbService.getDocumentByColumn<CallRoom>("call_rooms", "room_id", it)
+                }
+                val receiverPhone = room?.receiver_phone ?: room?.receiverPhone
+                if (!receiverPhone.isNullOrBlank()) {
+                    startSmsLoop(receiverPhone)
+                }
+            }
+        }
+    }
+
+    private fun initializeLobbyUi(binding: FragmentCallRoomBinding) {
         binding.lobbyContainer.visibility = View.VISIBLE
         binding.videoContainer.visibility = View.GONE
         binding.lobbyProgress.visibility = View.VISIBLE
@@ -188,25 +215,21 @@ class CallRoomFragment : Fragment() {
     private suspend fun initializeRoom(inmateId: String, callType: String) {
         val id = roomId ?: return
         try {
-            // Generate 6-digit OTP and random session token
             roomOtp = (100000..999999).random().toString()
             roomToken = "sess_${UUID.randomUUID().toString().replace("-", "")}"
 
-            // Check if room already exists
             val existing: CallRoom? = DbService.getDocumentByColumn("call_rooms", "room_id", id)
             if (existing != null) {
-                Log.d("CallRoom", "Room already exists, updating: $id")
                 DbService.updateFieldsByColumn("call_rooms", "room_id", id, mapOf(
                     "kiosk_id" to kioskId,
                     "inmate_id" to inmateId,
                     "call_type" to callType,
                     "room_status" to "WAITING",
                     "otp" to roomOtp,
-                    "token" to roomToken
+                    "token" to roomToken,
+                    "receiver_phone" to contactPhone
                 ))
             } else {
-                // INSERT the room first — UPDATE won't work on non-existent rows
-                Log.d("CallRoom", "Creating new room: $id with phone=$contactPhone")
                 val roomData: Map<String, Any> = mapOf(
                     "room_id" to id,
                     "kiosk_id" to kioskId,
@@ -216,122 +239,67 @@ class CallRoomFragment : Fragment() {
                     "receiver_phone" to contactPhone,
                     "otp" to roomOtp,
                     "token" to roomToken,
-                    "webrtc_signaling" to mapOf(
-                        "offer" to null,
-                        "answer" to null,
-                        "iceCandidates" to emptyList<Map<String, Any>>()
-                    )
+                    "webrtc_signaling" to mapOf("offer" to null, "answer" to null, "iceCandidates" to emptyList<Map<String, Any>>())
                 )
                 DbService.insertRaw("call_rooms", roomData)
             }
-            Log.d("CallRoom", "initializeRoom: success id=$id otp=$roomOtp token=$roomToken")
         } catch (ex: Exception) {
-            Log.e("CallRoom", "initializeRoom failed for id=$id", ex)
+            Log.e("CallRoom abhishek", "initializeRoom failed", ex)
         }
     }
 
-    private fun requestInitialPermissions() {
-        val requiredPermissions = mutableListOf(
-            Manifest.permission.CAMERA,
-            Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.SEND_SMS
-        )
-
-        val missing = requiredPermissions.filter {
-            ContextCompat.checkSelfPermission(requireContext(), it) != PackageManager.PERMISSION_GRANTED
-        }
-        Log.d("CallRoom", "requestInitialPermissions: missing=$missing")
-
-        if (missing.isNotEmpty()) {
-            permissionLauncher.launch(requiredPermissions.toTypedArray())
-        } else {
-            hasCameraAudioPermission = true
-            hasSmsPermission = true
-            Log.d("CallRoom", "requestInitialPermissions: all permissions already granted")
-        }
-    }
 
     private fun observeRoomStatus() {
         roomId?.let { id ->
-            roomPollJob = lifecycleScope.launch {
-                // Small delay to ensure room is created before first poll
+            roomPollJob = viewLifecycleOwner.lifecycleScope.launch {
                 delay(500L)
                 while (isActive) {
+                    if (_binding == null) break
                     try {
-                        val room: CallRoom? = DbService.getDocumentByColumn(
-                            table = "call_rooms",
-                            column = "room_id",
-                            value = id
-                        )
+                        val room: CallRoom? = DbService.getDocumentByColumn("call_rooms", "room_id", id)
                         val stateValue = room?.room_status?.uppercase() ?: "UNKNOWN"
                         val receiverPhone = room?.receiver_phone ?: room?.receiverPhone
-                        Log.d("CallRoom", "room poll: state=$stateValue receiverPhone=$receiverPhone")
+
+                        val binding = _binding
+                        if (binding == null) {
+                            Log.w("CallRoom abhishek", "Binding is null, skipping UI update")
+                            delay(3000L)
+                            continue
+                        }
 
                         when (stateValue) {
                             "WAITING" -> {
                                 currentRoomState = RoomState.WAITING
-                                showLobby("📱 Call link sent! Waiting for receiver to open...")
-                                stopSignalingPoll()
+                                showLobby(binding, "📱 Call link sent! Waiting for receiver to open...")
                                 stopRecordingService()
-                                // Start SMS loop only if we have a receiver phone AND permission
-                                if (!receiverPhone.isNullOrBlank() && hasSmsPermission) {
-                                    if (smsJob?.isActive != true) {
-                                        startSmsLoop(receiverPhone)
-                                    }
-                                } else if (!receiverPhone.isNullOrBlank() && !hasSmsPermission) {
-                                    Log.w("CallRoom", "Have receiver phone but SMS permission not granted yet")
+                                if (!receiverPhone.isNullOrBlank() && smsJob?.isActive != true) {
+                                    startSmsLoop(receiverPhone)
                                 }
                             }
                             "OTP_SENT" -> {
                                 currentRoomState = RoomState.OTP_SENT
-                                showLobby("✅ Link opened! Sending access code...")
-                                Log.d("CallRoom", "Room status changed to OTP_SENT, sending OTP SMS")
-                                // Send OTP via SMS when link is clicked
-                                val receiverPhone = room?.receiver_phone ?: room?.receiverPhone
-                                Log.d("CallRoom", "Receiver phone from room: $receiverPhone")
-                                
-                                if (!receiverPhone.isNullOrBlank() && hasSmsPermission) {
-                                    Log.d("CallRoom", "Calling sendOtpSms with phone: $receiverPhone")
+                                showLobby(binding, "✅ Link opened! Sending access code...")
+                                if (!receiverPhone.isNullOrBlank()) {
                                     sendOtpSms(receiverPhone)
-                                    showLobby("✅ Access code sent! Waiting for verification...")
-                                } else {
-                                    Log.w("CallRoom", "Cannot send OTP: phone=$receiverPhone, permission=$hasSmsPermission")
-                                    showLobby("⚠️ Cannot send access code. Please try again.")
                                 }
                                 stopSmsLoop()
                             }
                             "ACTIVE" -> {
                                 currentRoomState = RoomState.ACTIVE
-                                showLobby("🔐 Access code verified! Connecting to call...")
+                                showLobby(binding, "🔐 Access code verified! Connecting to call...")
                                 stopSmsLoop()
-                                if (!isCallStarted) {
-                                    if (hasCameraAudioPermission) {
-                                        activateCallSession()
-                                    } else {
-                                        requestInitialPermissions()
-                                    }
-                                }
+                                runPreCallDiagnostic()
                             }
                             "CONNECTED" -> {
                                 currentRoomState = RoomState.CONNECTED
-                                showLobby("✅ Call connected!")
-                                // WebRTC connected — stay in call UI
+                                showLobby(binding, "✅ Call connected!")
+                                startCallTimer()
                             }
-                            "DISCONNECTED" -> {
-                                currentRoomState = RoomState.DISCONNECTED
-                                teardownAndExit()
-                            }
-                            "TAMPER_KILLED" -> {
-                                currentRoomState = RoomState.TAMPER_KILLED
-                                teardownAndExit()
-                            }
-                            else -> {
-                                currentRoomState = RoomState.UNKNOWN
-                                showLobby("Waiting for terminal response...")
-                            }
+                            "DISCONNECTED", "TAMPER_KILLED" -> teardownAndExit()
+                            else -> showLobby(binding, "Waiting for terminal response...")
                         }
                     } catch (e: Exception) {
-                        Log.e("CallRoom", "Room polling failed", e)
+                        Log.e("CallRoom abhishek", "Room polling failed", e)
                     }
                     delay(3000L)
                 }
@@ -339,203 +307,106 @@ class CallRoomFragment : Fragment() {
         }
     }
 
-    private fun showLobby(message: String) {
-        binding.lobbyContainer.visibility = View.VISIBLE
-        binding.videoContainer.visibility = View.GONE
-        binding.remoteView.visibility = View.GONE
-        binding.localView.visibility = View.GONE
-        binding.recordingIndicator.visibility = View.GONE
-        binding.btnDisconnect.visibility = View.GONE
-        binding.tvLobbyStatus.text = message
-        binding.lobbyProgress.visibility = View.VISIBLE
-    }
-
-    private fun showCallUi() {
-        binding.lobbyContainer.visibility = View.GONE
-        binding.videoContainer.visibility = View.VISIBLE
-        binding.remoteView.visibility = View.VISIBLE
-        binding.localView.visibility = View.VISIBLE
-        binding.recordingIndicator.visibility = View.VISIBLE
-        binding.btnDisconnect.visibility = View.VISIBLE
-    }
-
-    private fun startSmsLoop(phone: String) {
-        Log.d("CallRoom", "startSmsLoop: phone=$phone hasSmsPermission=$hasSmsPermission inmateName=$inmateName")
+    private fun startCallTimer() {
+        if (timerJob?.isActive == true) return
         
-        // Validate phone number
-        if (phone.isBlank() || phone.length < 10) {
-            Log.e("CallRoom", "Invalid phone number: $phone")
-            return
-        }
+        val binding = _binding ?: return
+        binding.timerOverlay.visibility = View.VISIBLE
         
-        if (smsJob?.isActive == true) {
-            Log.d("CallRoom", "startSmsLoop skipped: job already active")
-            return
-        }
-        
-        if (!hasSmsPermission) {
-            Log.w("CallRoom", "startSmsLoop skipped: missing SEND_SMS permission")
-            return
-        }
-
-        smsJob = lifecycleScope.launch {
-            Log.d("CallRoom", "SMS loop started for phone=$phone")
-            
-            // Send link SMS only once
-            try {
-                // Use correct URL format that works with .htaccess: join.html?room=ROOM_ID&token=TOKEN
-                val smsLink = "https://prisonconnect-call.rf.gd/index.html?room=$roomId&token=$roomToken"
-                val linkMessage = "PrisonConnect: You have a video call request from " +
-                        "Inmate: $inmateName " +
-                        "at ${kioskId}. " +
-                        "Join: $smsLink"
-                
-                Log.d("CallRoom", "Attempting to send link SMS to $phone with inmateName=$inmateName")
-                Log.d("CallRoom", "SMS Link: $smsLink")
-                sendSmsWithDeliveryTracking(phone, linkMessage, "LINK")
-                Log.d("CallRoom", "Link SMS sent successfully to $phone")
-            } catch (ex: Exception) {
-                Log.e("CallRoom", "SMS send failed to $phone", ex)
-            }
-            
-            // Wait for room state to change (don't resend link)
-            while (isActive && currentRoomState == RoomState.WAITING) {
+        timerJob = viewLifecycleOwner.lifecycleScope.launch {
+            while (isActive && currentRoomState == RoomState.CONNECTED) {
                 delay(1000)
+                val currentBinding = _binding ?: break
+                
+                elapsedSeconds++
+                remainingBalanceSeconds--
+                
+                currentBinding.tvCallDuration.text = formatSeconds(elapsedSeconds)
+                currentBinding.tvRemainingBalance.text = "${formatSeconds(remainingBalanceSeconds)} remaining"
+                
+                if (remainingBalanceSeconds <= 0) {
+                    Log.d("CallRoom abhishek", "Balance exhausted, hanging up")
+                    updateRoomStatus("DISCONNECTED")
+                    teardownAndExit()
+                    break
+                }
             }
-            Log.d("CallRoom", "SMS loop ended: currentRoomState=$currentRoomState")
         }
     }
+
+    private fun formatSeconds(totalSeconds: Long): String {
+        val minutes = totalSeconds / 60
+        val seconds = totalSeconds % 60
+        return String.format("%02d:%02d", minutes, seconds)
+    }
+
+    private fun formatDuration(totalSeconds: Long): String {
+        val minutes = totalSeconds / 60
+        val seconds = totalSeconds % 60
+        return "$minutes min $seconds sec"
+    }
+
+    private var isLinkSent = false
     
+    private fun startSmsLoop(phone: String) {
+        Log.d("CallRoom abhishek", "startSmsLoop called with phone: $phone, isLinkSent: $isLinkSent, contactPhone: $contactPhone")
+        smsJob = viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                // Use contactPhone as fallback if phone is empty
+                val targetPhone = if (phone.isNotBlank()) phone else contactPhone
+                if (!isLinkSent && targetPhone.isNotBlank()) {
+                    isLinkSent = true
+                    val smsLink = "https://prisonconnect-call.rf.gd/index.html?room=$roomId&token=$roomToken"
+                    val linkMessage = "PrisonConnect: You have a video call request from Inmate: $inmateName at $kioskId. Join: $smsLink"
+                    Log.d("CallRoom abhishek", "Sending SMS link via Supabase to: $targetPhone")
+                    
+                    val result = smsController.sendSmsViaSupabase(targetPhone, linkMessage)
+                    val binding = _binding ?: return@launch
+                    
+                    if (result.isSuccess) {
+                        showLobby(binding, "📱 Call link sent! Waiting for receiver to open...")
+                    } else {
+                        isLinkSent = false // Allow retry
+                        Log.e("CallRoom abhishek", "SMS link failed", result.exceptionOrNull())
+                        showLobby(binding, "❌ SMS link failed: ${result.exceptionOrNull()?.message}")
+                    }
+                } else if (targetPhone.isBlank()) {
+                    Log.w("CallRoom abhishek", "SMS not sent - phone blank")
+                    val binding = _binding ?: return@launch
+                    showLobby(binding, "❌ SMS not sent. Invalid phone number.")
+                }
+            } catch (ex: Exception) {
+                Log.e("CallRoom abhishek", "SMS send loop failed", ex)
+                val binding = _binding ?: return@launch
+                showLobby(binding, "❌ SMS error: ${ex.message}")
+            }
+            while (isActive && currentRoomState == RoomState.WAITING) delay(1000)
+        }
+    }
+
     private fun sendOtpSms(phone: String) {
-        Log.d("CallRoom", "sendOtpSms: phone=$phone hasSmsPermission=$hasSmsPermission roomOtp=$roomOtp")
-        
-        // Validate phone number
-        if (phone.isBlank() || phone.length < 10) {
-            Log.e("CallRoom", "Invalid phone number for OTP: $phone")
-            return
-        }
-        
-        if (!hasSmsPermission) {
-            Log.w("CallRoom", "sendOtpSms skipped: missing SEND_SMS permission")
-            return
-        }
-        
-        if (roomOtp.isBlank()) {
-            Log.e("CallRoom", "sendOtpSms skipped: OTP is empty")
-            return
-        }
-        
-        try {
-            val otpMessage = "PrisonConnect: Your access code is: $roomOtp. " +
-                    "Enter this code on the website to join the call."
-            
-            Log.d("CallRoom", "Attempting to send OTP SMS to $phone with OTP=$roomOtp")
-            sendSmsWithDeliveryTracking(phone, otpMessage, "OTP")
-            Log.d("CallRoom", "OTP SMS queued successfully to $phone")
-            
-            // Update UI to show OTP sent
-            showLobby("✅ Access code sent! Please check your messages.")
-        } catch (ex: Exception) {
-            Log.e("CallRoom", "OTP SMS send failed to $phone", ex)
-            showLobby("❌ Failed to send access code. Please try again.")
-        }
-    }
-    
-    private fun sendSmsWithDeliveryTracking(phone: String, message: String, type: String) {
-        val smsManager = SmsManager.getDefault()
-        
-        // Create pending intents for tracking
-        val sentIntent = PendingIntent.getBroadcast(
-            requireContext(),
-            0,
-            Intent("SMS_SENT").putExtra("type", type),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-        
-        val deliveryIntent = PendingIntent.getBroadcast(
-            requireContext(),
-            0,
-            Intent("SMS_DELIVERED").putExtra("type", type),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-        
-        // Unregister previous receivers if any
-        try {
-            if (smsSentReceiver != null) {
-                requireContext().unregisterReceiver(smsSentReceiver)
-            }
-            if (smsDeliveredReceiver != null) {
-                requireContext().unregisterReceiver(smsDeliveredReceiver)
-            }
-        } catch (e: Exception) {
-            // Receivers might not be registered yet
-        }
-        
-        // Create and register broadcast receivers for tracking
-        smsSentReceiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                Log.d("CallRoom", "$type SMS sent callback received, resultCode=$resultCode")
-                when (resultCode) {
-                    -1 -> {
-                        Log.d("CallRoom", "$type SMS sent successfully")
-                    }
-                    1 -> {
-                        Log.e("CallRoom", "$type SMS failed: Generic failure")
-                    }
-                    2 -> {
-                        Log.e("CallRoom", "$type SMS failed: No service")
-                    }
-                    3 -> {
-                        Log.e("CallRoom", "$type SMS failed: Null PDU")
-                    }
-                    4 -> {
-                        Log.e("CallRoom", "$type SMS failed: Radio off")
-                    }
+        if (roomOtp.isBlank() || isOtpSent) return
+        isOtpSent = true
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                val otpMessage = "PrisonConnect: Your access code is: $roomOtp. Enter this code on the website to join the call."
+                Log.d("CallRoom abhishek", "Sending OTP via Supabase to: $phone")
+                
+                val result = smsController.sendSmsViaSupabase(phone, otpMessage)
+                val binding = _binding ?: return@launch
+                
+                if (result.isSuccess) {
+                    showLobby(binding, "✅ Access code sent! Please check your messages.")
+                } else {
+                    isOtpSent = false // Reset on failure
+                    Log.e("CallRoom abhishek", "OTP SMS failed", result.exceptionOrNull())
+                    showLobby(binding, "❌ Failed to send access code: ${result.exceptionOrNull()?.message}")
                 }
+            } catch (ex: Exception) {
+                isOtpSent = false // Reset on failure
+                val binding = _binding ?: return@launch
+                showLobby(binding, "❌ Failed to send access code. Please try again.")
             }
-        }
-        
-        smsDeliveredReceiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                Log.d("CallRoom", "$type SMS delivery callback received, resultCode=$resultCode")
-                when (resultCode) {
-                    -1 -> {
-                        Log.d("CallRoom", "$type SMS delivered successfully")
-                    }
-                    else -> {
-                        Log.w("CallRoom", "$type SMS delivery failed")
-                    }
-                }
-            }
-        }
-        
-        // Register receivers
-        requireContext().registerReceiver(smsSentReceiver, IntentFilter("SMS_SENT"))
-        requireContext().registerReceiver(smsDeliveredReceiver, IntentFilter("SMS_DELIVERED"))
-        
-        try {
-            // Split message if too long
-            val messageParts = smsManager.divideMessage(message)
-            val sentIntents = ArrayList<PendingIntent>()
-            val deliveryIntents = ArrayList<PendingIntent>()
-            
-            repeat(messageParts.size) {
-                sentIntents.add(sentIntent)
-                deliveryIntents.add(deliveryIntent)
-            }
-            
-            smsManager.sendMultipartTextMessage(
-                phone,
-                null,
-                messageParts,
-                sentIntents,
-                deliveryIntents
-            )
-            
-            Log.d("CallRoom", "$type SMS queued for sending to $phone (${messageParts.size} parts)")
-        } catch (ex: Exception) {
-            Log.e("CallRoom", "$type SMS send failed: ${ex.message}")
-            throw ex
         }
     }
 
@@ -543,368 +414,218 @@ class CallRoomFragment : Fragment() {
         if (isCallStarted) return
         isCallStarted = true
         stopSmsLoop()
-        setupSurfaceViews()
-        initializeWebRTC()
-        setupPeerConnection()
-        startLocalStream()
-        listenForRealtimeSignaling()
-        startRecordingService()
-        showCallUi()
-        // Do NOT create offer here — wait for web-ready event from web side
-        Log.d("CallRoom", "Call session activated, waiting for web-ready signal")
-    }
 
-    private fun setupSurfaceViews() {
-        binding.localView.init(eglBase.eglBaseContext, null)
-        binding.localView.setMirror(true)
-        binding.localView.setEnableHardwareScaler(true)
-
-        binding.remoteView.init(eglBase.eglBaseContext, null)
-        binding.remoteView.setEnableHardwareScaler(true)
-    }
-
-    private fun initializeWebRTC() {
-        PeerConnectionFactory.initialize(
-            PeerConnectionFactory.InitializationOptions.builder(requireContext())
-                .setEnableInternalTracer(true)
-                .createInitializationOptions()
-        )
-
-        val options = PeerConnectionFactory.Options()
-        val encoderFactory = DefaultVideoEncoderFactory(eglBase.eglBaseContext, true, true)
-        val decoderFactory = DefaultVideoDecoderFactory(eglBase.eglBaseContext)
-
-        factory = PeerConnectionFactory.builder()
-            .setOptions(options)
-            .setVideoEncoderFactory(encoderFactory)
-            .setVideoDecoderFactory(decoderFactory)
-            .createPeerConnectionFactory()
-    }
-
-    private fun setupPeerConnection() {
-        val iceServers = listOf(
-            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer()
-        )
-
-        val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
-            // Use UNIFIED_PLAN to match web browser's default
-            sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+        val binding = _binding ?: run {
+            Log.w("CallRoom abhishek", "activateCallSession: Binding null")
+            isCallStarted = false
+            return
         }
-
-        peerConnection = factory?.createPeerConnection(rtcConfig, object : PeerConnection.Observer {
-            override fun onIceCandidate(candidate: IceCandidate) {
-                sendIceCandidate(candidate)
-            }
-
-            override fun onAddTrack(receiver: RtpReceiver, streams: Array<out MediaStream>) {
-                Log.d("CallRoom", "Remote track added: ${receiver.track()?.kind()}")
-                val videoTrack = streams.flatMap { it.videoTracks }.firstOrNull()
-                videoTrack?.addSink(binding.remoteView)
-            }
-
-            override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState) {
-                Log.d("CallRoom", "ICE connection state: $newState")
-                if (newState == PeerConnection.IceConnectionState.CONNECTED) {
-                    updateRoomStatus("CONNECTED")
-                    Log.d("CallRoom", "ICE connection established!")
-                } else if (newState == PeerConnection.IceConnectionState.FAILED) {
-                    Log.e("CallRoom", "ICE connection failed!")
-                }
-            }
-
-            override fun onSignalingChange(p0: PeerConnection.SignalingState?) {
-                Log.d("CallRoom", "Signaling state: ${p0 ?: "null"}")
-            }
-
-            override fun onIceConnectionReceivingChange(p0: Boolean) {}
-            override fun onIceGatheringChange(p0: PeerConnection.IceGatheringState?) {}
-            override fun onIceCandidatesRemoved(p0: Array<out IceCandidate>?) {}
-            override fun onRemoveStream(p0: MediaStream?) {}
-            override fun onDataChannel(p0: DataChannel?) {}
-            override fun onRenegotiationNeeded() {}
-            override fun onAddStream(p0: MediaStream?) {}
-        })
-    }
-
-    private fun startLocalStream() {
-        val audioSource = factory?.createAudioSource(MediaConstraints())
-        localAudioTrack = factory?.createAudioTrack("ARDAMSa0", audioSource)
-        localAudioTrack?.setEnabled(true)
-
-        videoCapturer = createVideoCapturer()
-        val videoSource = factory?.createVideoSource(false)
-
-        videoCapturer?.initialize(
-            SurfaceTextureHelper.create("VideoCapturerThread", eglBase.eglBaseContext),
-            requireContext(),
-            videoSource?.capturerObserver
-        )
-        videoCapturer?.startCapture(1280, 720, 30)
-
-        localVideoTrack = factory?.createVideoTrack("ARDAMSv0", videoSource)
-        localVideoTrack?.setEnabled(true)
-        localVideoTrack?.addSink(binding.localView)
-
-        // Add tracks directly to peer connection (new API)
-        peerConnection?.addTrack(localAudioTrack)
-        peerConnection?.addTrack(localVideoTrack)
         
-        Log.d("CallRoom", "Local audio and video tracks added to peer connection")
-    }
+        try {
+            Log.d("CallRoom abhishek", "Activating call session...")
+            binding.localView.init(eglBase.eglBaseContext, null)
+            binding.localView.setMirror(true)
+            binding.remoteView.init(eglBase.eglBaseContext, null)
 
-    private fun createVideoCapturer(): VideoCapturer? {
-        val enumerator = Camera2Enumerator(requireContext())
-        return enumerator.deviceNames.firstOrNull { enumerator.isFrontFacing(it) }
-            ?.let { enumerator.createCapturer(it, null) }
-    }
+            webRtcManager.setupPeerConnection()
+            webRtcManager.startLocalStream(binding.localView)
 
-    private fun createOffer() {
-        peerConnection?.createOffer(object : SdpObserver {
-            override fun onCreateSuccess(sdp: SessionDescription) {
-                peerConnection?.setLocalDescription(object : SdpObserver {
-                    override fun onSetSuccess() {
-                        sendOffer(sdp)
-                    }
-                    override fun onCreateSuccess(p0: SessionDescription?) {}
-                    override fun onCreateFailure(p0: String?) {}
-                    override fun onSetFailure(p0: String?) {}
-                }, sdp)
+            // Process any pending web-ready event that arrived before peer connection was ready
+            if (pendingWebReady) {
+                Log.d("CallRoom abhishek", "Processing pending web-ready event")
+                onWebReady()
+                pendingWebReady = false
             }
 
-            override fun onSetSuccess() {}
-            override fun onCreateFailure(p0: String?) {}
-            override fun onSetFailure(p0: String?) {}
-        }, MediaConstraints())
+            startRecordingService()
+            showCallUi(binding)
+            
+            // Start connect timeout - if not connected within 25s, show retry/cancel
+            startConnectTimeout()
+        } catch (e: Exception) {
+            Log.e("CallRoom abhishek", "Failed to activate call session", e)
+            isCallStarted = false
+            showLobby(binding, "❌ Error: Failed to start camera. Please try again.")
+        }
     }
-
-    private fun sendOffer(sdp: SessionDescription) {
-        roomId?.let { id ->
-            lifecycleScope.launch {
-                try {
-                    // Map ko explicit kotlinx.serialization.json structure me transform karein
-                    val payloadJson = buildJsonObject {
-                        put("sender", "android")
-                        putJsonObject("offer") {
-                            put("type", sdp.type.canonicalForm())
-                            put("sdp", sdp.description)
-                        }
-                    }
-
-                    val offerMessage = buildJsonObject {
-                        put("sender", "android")
-                        putJsonObject("offer") {
-                            put("type", sdp.type.canonicalForm())
-                            put("sdp", sdp.description)
-                        }
-                    }
-                    realtimeChannel?.broadcast(event = "offer", message = offerMessage)
-                    Log.d("CallRoom", "Offer sent via Realtime")
-                } catch (ex: Exception) {
-                    Log.e("CallRoom", "sendOffer failed", ex)
-                }
+    
+    private fun startConnectTimeout() {
+        connectTimeoutJob?.cancel()
+        connectTimeoutJob = viewLifecycleOwner.lifecycleScope.launch {
+            delay(25000) // 25 second timeout
+            val binding = _binding ?: return@launch
+            if (currentRoomState != RoomState.CONNECTED && isCallStarted) {
+                Log.w("CallRoom abhishek", "Connect timeout reached, showing retry option")
+                showLobby(binding, "❌ Connection failed. Check network or try again.")
+                // Show cancel button for retry
+                binding.btnCancelCall.visibility = View.VISIBLE
             }
         }
     }
 
-    private fun sendIceCandidate(candidate: IceCandidate) {
-        // Add candidate to batch instead of sending immediately
-        pendingCandidates.add(candidate)
-        Log.d("CallRoom", "ICE candidate queued (${pendingCandidates.size} pending)")
+    override fun onRemoteVideoTrackReceived(videoTrack: VideoTrack) {
+        Log.d("CallRoom abhishek", "Remote video track received: ${videoTrack.id()}")
+        remoteVideoTrack = videoTrack
+        val binding = _binding ?: return
+        videoTrack.addSink(binding.remoteView)
+    }
+
+    override fun onIceCandidateGenerated(candidate: IceCandidate) {
+        Log.d("CallRoom abhishek", "Local ICE candidate found: ${candidate.serverUrl ?: "local"}")
+        synchronized(localCandidatesQueue) {
+            localCandidatesQueue.add(candidate)
+        }
         
-        // Start batch job if not already running
         if (candidateBatchJob?.isActive != true) {
-            candidateBatchJob = lifecycleScope.launch {
-                // Wait 100ms to collect more candidates
-                delay(100)
+            candidateBatchJob = viewLifecycleOwner.lifecycleScope.launch {
+                delay(300) // Gathers more candidates before sending
+                val candidatesToSend = synchronized(localCandidatesQueue) {
+                    val list = localCandidatesQueue.toList()
+                    localCandidatesQueue.clear()
+                    list
+                }
                 
-                // Send all pending candidates in one batch
-                if (pendingCandidates.isNotEmpty()) {
-                    val candidatesToSend = pendingCandidates.toList()
-                    pendingCandidates.clear()
-                    
-                    try {
-                        // Convert to JsonArray properly
-                        val candidatesJsonArray = JsonArray(candidatesToSend.map { c ->
-                            buildJsonObject {
-                                put("sdpMid", c.sdpMid ?: "")
-                                put("sdpMLineIndex", c.sdpMLineIndex)
-                                put("sdp", c.sdp)
-                            }
-                        })
-                        
-                        val batchMessage = buildJsonObject {
-                            put("sender", "android")
-                            put("candidates", candidatesJsonArray)
+                if (candidatesToSend.isNotEmpty()) {
+                    Log.d("CallRoom abhishek", "Sending batch of ${candidatesToSend.size} local ICE candidates")
+                    val jsonArray = JsonArray(candidatesToSend.map {
+                        buildJsonObject {
+                            put("sdpMid", it.sdpMid ?: "")
+                            put("sdpMLineIndex", it.sdpMLineIndex)
+                            put("candidate", it.sdp)
                         }
-                        
-                        realtimeChannel?.broadcast(event = "candidates-batch", message = batchMessage)
-                        Log.d("CallRoom", "Sent ${candidatesToSend.size} ICE candidates via Realtime")
-                    } catch (ex: Exception) {
-                        Log.e("CallRoom", "sendIceCandidate batch failed", ex)
+                    })
+                    signalingClient?.sendCandidateBatch(jsonArray)
+                }
+            }
+        }
+    }
+
+    override fun onIceConnected() { 
+        connectTimeoutJob?.cancel()
+        updateRoomStatus("CONNECTED") 
+    }
+    
+    override fun onIceConnectionFailed() {
+        connectTimeoutJob?.cancel()
+        val binding = _binding ?: return
+        Log.w("CallRoom abhishek", "ICE connection failed or disconnected")
+        if (isCallStarted && currentRoomState != RoomState.CONNECTED) {
+            showLobby(binding, "❌ Connection failed. Check network or try again.")
+            binding.btnCancelCall.visibility = View.VISIBLE
+        }
+    }
+
+    override fun onSiteOpened() { 
+        val binding = _binding ?: return
+        if (currentRoomState == RoomState.WAITING) showLobby(binding, "✅ Link opened! Waiting for OTP verification...") 
+    }
+    override fun onOtpVerified() { 
+        val binding = _binding ?: return
+        if (currentRoomState == RoomState.OTP_SENT) showLobby(binding, "🔐 Access code verified! Connecting to call...") 
+    }
+    
+    override fun onAnswerReceived(sdp: String, type: String) {
+        Log.d("CallRoom abhishek", "onAnswerReceived: type=$type")
+        val sessionDescription = SessionDescription(SessionDescription.Type.fromCanonicalForm(type), sdp)
+        webRtcManager.peerConnection?.setRemoteDescription(object : SdpObserver {
+            override fun onSetSuccess() {
+                isRemoteDescriptionSet = true
+                Log.d("CallRoom abhishek", "Remote description set successfully")
+                synchronized(remoteCandidatesQueue) {
+                    if (remoteCandidatesQueue.isNotEmpty()) {
+                        Log.d("CallRoom abhishek", "Adding ${remoteCandidatesQueue.size} queued remote ICE candidates")
+                        remoteCandidatesQueue.forEach { webRtcManager.peerConnection?.addIceCandidate(it) }
+                        remoteCandidatesQueue.clear()
+                    }
+                }
+            }
+            override fun onCreateSuccess(p0: SessionDescription?) {}
+            override fun onCreateFailure(p0: String?) {}
+            override fun onSetFailure(p0: String?) {
+                Log.e("CallRoom abhishek", "Failed to set remote description: $p0")
+            }
+        }, sessionDescription)
+    }
+
+    override fun onCandidateBatchReceived(candidates: List<JsonObject>) {
+        Log.d("CallRoom abhishek", "onCandidateBatchReceived: count=${candidates.size}")
+        candidates.forEach { candidateData ->
+            val sdpMid = candidateData["sdpMid"]?.jsonPrimitive?.content
+            val sdpMLineIndex = candidateData["sdpMLineIndex"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+            val candidateSdp = candidateData["candidate"]?.jsonPrimitive?.content ?: candidateData["sdp"]?.jsonPrimitive?.content
+            if (candidateSdp != null) {
+                val candidate = IceCandidate(sdpMid, sdpMLineIndex, candidateSdp)
+                if (isRemoteDescriptionSet) {
+                    webRtcManager.peerConnection?.addIceCandidate(candidate)
+                } else {
+                    synchronized(remoteCandidatesQueue) {
+                        remoteCandidatesQueue.add(candidate)
                     }
                 }
             }
         }
     }
 
-    private fun listenForRealtimeSignaling() {
-        val id = roomId ?: return
-        signalingPollJob = lifecycleScope.launch {
-            try {
-                // Create channel subscription
-                realtimeChannel = SupabaseConfig.client.channel("room_$id")
-
-                // Listen for site-opened event (web client opened the link)
-                val siteOpenedFlow = realtimeChannel?.broadcastFlow<JsonObject>("site-opened")
-                lifecycleScope.launch {
-                    siteOpenedFlow?.collect { payload ->
-                        Log.d("CallRoom", "Website opened by receiver")
-                        // Update UI to show link was opened
-                        if (currentRoomState == RoomState.WAITING) {
-                            showLobby("✅ Link opened! Waiting for OTP verification...")
+    override fun onWebReady() {
+        Log.d("CallRoom abhishek", "onWebReady received")
+        val binding = _binding ?: return
+        val pc = webRtcManager.peerConnection
+        
+        // If peer connection is not ready yet, queue the web-ready event
+        if (pc == null) {
+            Log.d("CallRoom abhishek", "Peer connection not ready, queuing web-ready")
+            pendingWebReady = true
+            return
+        }
+        
+        if (pc.remoteDescription == null && pc.signalingState() == PeerConnection.SignalingState.STABLE) {
+            Log.d("CallRoom abhishek", "Creating Offer...")
+            pc.createOffer(object : SdpObserver {
+                override fun onCreateSuccess(sdp: SessionDescription) {
+                    Log.d("CallRoom abhishek", "Offer created, setting local description")
+                    pc.setLocalDescription(object : SdpObserver {
+                        override fun onSetSuccess() { 
+                            Log.d("CallRoom abhishek", "Local description set, sending offer")
+                            signalingClient?.sendOffer(sdp.description, sdp.type.canonicalForm()) 
                         }
-                    }
-                }
-
-                // Listen for otp-verified event (web client verified OTP)
-                val otpVerifiedFlow = realtimeChannel?.broadcastFlow<JsonObject>("otp-verified")
-                lifecycleScope.launch {
-                    otpVerifiedFlow?.collect { payload ->
-                        Log.d("CallRoom", "OTP verified by receiver")
-                        // Update UI to show OTP was verified
-                        if (currentRoomState == RoomState.OTP_SENT) {
-                            showLobby("🔐 Access code verified! Connecting to call...")
+                        override fun onCreateSuccess(p0: SessionDescription?) {}
+                        override fun onCreateFailure(p0: String?) {}
+                        override fun onSetFailure(p0: String?) {
+                            Log.e("CallRoom abhishek", "Failed to set local description: $p0")
                         }
-                    }
+                    }, sdp)
                 }
-
-                // Listen for web-ready event (web client is ready to receive offer)
-                val webReadyFlow = realtimeChannel?.broadcastFlow<JsonObject>("web-ready")
-                lifecycleScope.launch {
-                    webReadyFlow?.collect { payload ->
-                        Log.d("CallRoom", "Web client is ready, creating offer")
-                        // Create offer when web client signals they're ready
-                        if (peerConnection?.remoteDescription == null && peerConnection?.signalingState() == PeerConnection.SignalingState.STABLE) {
-                            createOffer()
-                        }
-                    }
+                override fun onSetSuccess() {}
+                override fun onCreateFailure(p0: String?) {
+                    Log.e("CallRoom abhishek", "Failed to create offer: $p0")
                 }
+                override fun onSetFailure(p0: String?) {}
+            }, MediaConstraints())
+        }
+    }
 
-                // Listen for answer event
-                val answerFlow = realtimeChannel?.broadcastFlow<JsonObject>("answer")
-                lifecycleScope.launch {
-                    answerFlow?.collect { payload ->
-                        Log.d("CallRoom", "Received answer via Realtime")
-                        try {
-                            val answerData = payload["answer"] as? JsonObject
-                            if (answerData != null) {
-                                val typeStr = answerData["type"]?.jsonPrimitive?.content ?: ""
-                                val sdpStr = answerData["sdp"]?.jsonPrimitive?.content ?: ""
+    override fun onHangupReceived() { teardownAndExit() }
 
-                                val sdp = SessionDescription(
-                                    SessionDescription.Type.fromCanonicalForm(typeStr),
-                                    sdpStr
-                                )
-                                peerConnection?.setRemoteDescription(object : SdpObserver {
-                                    override fun onSetSuccess() {
-                                        Log.d("CallRoom", "Answer set successfully")
-                                        isRemoteDescriptionSet = true
-                                        
-                                        // Now add any pending candidates
-                                        if (pendingCandidates.isNotEmpty()) {
-                                            Log.d("CallRoom", "Adding ${pendingCandidates.size} pending candidates")
-                                            val candidatesToAdd = pendingCandidates.toList()
-                                            pendingCandidates.clear()
-                                            
-                                            for (candidate in candidatesToAdd) {
-                                                try {
-                                                    peerConnection?.addIceCandidate(candidate)
-                                                } catch (e: Exception) {
-                                                    Log.e("CallRoom", "Failed to add pending candidate", e)
-                                                }
-                                            }
-                                        }
-                                    }
-                                    override fun onCreateSuccess(p0: SessionDescription?) {}
-                                    override fun onCreateFailure(p0: String?) {}
-                                    override fun onSetFailure(p0: String?) {}
-                                }, sdp)
-                            }
-                        } catch (e: Exception) {
-                            Log.e("CallRoom", "Failed to parse WebRTC answer", e)
-                        }
-                    }
-                }
+    private fun showLobby(binding: FragmentCallRoomBinding, message: String) {
+        binding.lobbyContainer.visibility = View.VISIBLE
+        binding.videoContainer.visibility = View.GONE
+        binding.tvLobbyStatus.text = message
+    }
 
-                // Listen for candidates-batch event (batched ICE candidates from web)
-                val candidateBatchFlow = realtimeChannel?.broadcastFlow<JsonObject>("candidates-batch")
-                lifecycleScope.launch {
-                    candidateBatchFlow?.collect { payload ->
-                        Log.d("CallRoom", "Received candidate batch via Realtime")
-                        try {
-                            val candidatesArray = payload["candidates"] as? List<JsonObject>
-                            if (candidatesArray != null) {
-                                // If remote description is set, add candidates immediately
-                                // Otherwise, queue them for later
-                                if (peerConnection?.remoteDescription != null) {
-                                    for (candidateData in candidatesArray) {
-                                        val sdpMid = candidateData["sdpMid"]?.jsonPrimitive?.content
-                                        val sdpMLineIndex = candidateData["sdpMLineIndex"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                                        val sdp = candidateData["sdp"]?.jsonPrimitive?.content
-
-                                        if (sdp != null) {
-                                            val candidate = IceCandidate(sdpMid, sdpMLineIndex, sdp)
-                                            peerConnection?.addIceCandidate(candidate)
-                                        }
-                                    }
-                                    Log.d("CallRoom", "Added ${candidatesArray.size} candidates from batch")
-                                } else {
-                                    // Queue candidates for later
-                                    Log.d("CallRoom", "Queueing ${candidatesArray.size} candidates (no remote description yet)")
-                                    for (candidateData in candidatesArray) {
-                                        val sdpMid = candidateData["sdpMid"]?.jsonPrimitive?.content
-                                        val sdpMLineIndex = candidateData["sdpMLineIndex"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                                        val sdp = candidateData["sdp"]?.jsonPrimitive?.content
-
-                                        if (sdp != null) {
-                                            val candidate = IceCandidate(sdpMid, sdpMLineIndex, sdp)
-                                            pendingCandidates.add(candidate)
-                                        }
-                                    }
-                                }
-                            }
-                        } catch (e: Exception) {
-                            Log.e("CallRoom", "Failed to parse ICE candidate batch", e)
-                        }
-                    }
-                }
-
-                // Listen for hangup event
-                val hangupFlow = realtimeChannel?.broadcastFlow<JsonObject>("hangup")
-                lifecycleScope.launch {
-                    hangupFlow?.collect { payload ->
-                        Log.d("CallRoom", "Received hangup via Realtime")
-                        teardownAndExit()
-                    }
-                }
-
-                // Subscribe to channel
-                realtimeChannel?.subscribe()
-                Log.d("CallRoom", "Realtime channel subscribed: room_$id")
-            } catch (e: Exception) {
-                Log.e("CallRoom", "Failed to subscribe to Realtime channel", e)
-            }
+    private fun showCallUi(binding: FragmentCallRoomBinding) {
+        binding.lobbyContainer.visibility = View.GONE
+        binding.videoContainer.visibility = View.VISIBLE
+        binding.btnDisconnect.setOnClickListener {
+            updateRoomStatus("DISCONNECTED")
+            teardownAndExit()
         }
     }
 
     private fun updateRoomStatus(status: String) {
         roomId?.let { id ->
             lifecycleScope.launch {
-                try {
-                    DbService.updateFieldsByColumn("call_rooms", "room_id", id, mapOf("room_status" to status))
-                } catch (ex: Exception) {
-                    Log.e("CallRoom", "updateRoomStatus failed", ex)
-                }
+                try { DbService.updateFieldsByColumn("call_rooms", "room_id", id, mapOf("room_status" to status)) }
+                catch (ex: Exception) { Log.e("CallRoom abhishek", "updateRoomStatus failed", ex) }
             }
         }
     }
@@ -919,101 +640,24 @@ class CallRoomFragment : Fragment() {
         requireContext().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
 
-    private fun teardownAndExit() {
-        stopSmsLoop()
-        stopRecordingService()
-        cleanupWebRTC()
-        roomPollJob?.cancel()
-        signalingPollJob?.cancel()
-
-        // Send hangup via Realtime before disconnecting
-        roomId?.let { id ->
-            lifecycleScope.launch {
-                try {
-                    val payloadJson = buildJsonObject {
-                        put("sender", "android")
-                    }
-                    val hangupMessage = buildJsonObject {
-                        put("sender", "android")
-                    }
-                    realtimeChannel?.broadcast(event = "hangup", message = hangupMessage)
-                    realtimeChannel?.unsubscribe()
-                } catch (ex: Exception) {
-                    Log.e("CallRoom", "hangup broadcast failed", ex)
-                }
-            }
-        }
-
-        requireActivity().supportFragmentManager.popBackStack()
-    }
-
     private fun stopRecordingService() {
+        Log.d("CallRoom abhishek", "Stopping recording service...")
         if (isServiceBound) {
-            recordingService?.stopAndUpload()
-            requireContext().unbindService(serviceConnection)
+            try {
+                recordingService?.stopAndUpload()
+                requireContext().unbindService(serviceConnection)
+            } catch (e: Exception) {
+                Log.e("CallRoom abhishek", "Unbind failed", e)
+            }
             isServiceBound = false
         }
-    }
-
-    private fun cleanupWebRTC() {
+        // Explicitly stop the service to kill the foreground notification
         try {
-            videoCapturer?.stopCapture()
+            val intent = Intent(requireContext(), SecureHardwareRecordingService::class.java)
+            requireContext().stopService(intent)
         } catch (e: Exception) {
-            Log.e("CallRoom", "Error stopping capturer", e)
+            Log.e("CallRoom abhishek", "StopService failed", e)
         }
-        
-        try {
-            localVideoTrack?.dispose()
-        } catch (e: Exception) {
-            Log.e("CallRoom", "Error disposing video track", e)
-        }
-        
-        try {
-            localAudioTrack?.dispose()
-        } catch (e: Exception) {
-            Log.e("CallRoom", "Error disposing audio track", e)
-        }
-        
-        try {
-            peerConnection?.close()
-        } catch (e: Exception) {
-            Log.e("CallRoom", "Error closing peer connection", e)
-        }
-        
-        try {
-            factory?.dispose()
-        } catch (e: Exception) {
-            Log.e("CallRoom", "Error disposing factory", e)
-        }
-        
-        try {
-            videoCapturer?.dispose()
-        } catch (e: Exception) {
-            Log.e("CallRoom", "Error disposing capturer", e)
-        }
-        
-        try {
-            binding.localView.release()
-        } catch (e: Exception) {
-            Log.e("CallRoom", "Error releasing local view", e)
-        }
-        
-        try {
-            binding.remoteView.release()
-        } catch (e: Exception) {
-            Log.e("CallRoom", "Error releasing remote view", e)
-        }
-        
-        peerConnection = null
-        factory = null
-        localVideoTrack = null
-        localAudioTrack = null
-        videoCapturer = null
-    }
-
-    private fun stopSignalingPoll() {
-        signalingPollJob?.cancel()
-        signalingPollJob = null
     }
 
     private fun stopSmsLoop() {
@@ -1021,26 +665,96 @@ class CallRoomFragment : Fragment() {
         smsJob = null
     }
 
-    override fun onDestroyView() {
-        super.onDestroyView()
-        stopSmsLoop()
-        roomPollJob?.cancel()
-        signalingPollJob?.cancel()
-
-        // Leave Realtime channel
-        lifecycleScope.launch {
+    private fun teardownAndExit() {
+        Log.d("CallRoom abhishek", "teardownAndExit called")
+        releaseResources()
+        
+        viewLifecycleOwner.lifecycleScope.launch {
+            // Update balance in database
             try {
-                realtimeChannel?.unsubscribe()
-            } catch (ex: Exception) {
-                Log.e("CallRoom", "Failed to unsubscribe from Realtime channel", ex)
+                val newBalance = remainingBalanceSeconds.coerceAtLeast(0)
+                DbService.updateFields("users", inmateId, mapOf("balance_remaining_seconds" to newBalance))
+                Log.d("CallRoom abhishek", "Balance updated: $newBalance seconds")
+            } catch (e: Exception) {
+                Log.e("CallRoom abhishek", "Failed to update balance", e)
+            }
+            
+            delay(1000) // Give signaling a moment to propagate
+            deleteRoom()
+            
+            // Show summary dialog
+            showSummaryDialog()
+        }
+    }
+
+    private fun releaseResources() {
+        Log.d("CallRoom abhishek", "Releasing all resources...")
+        stopSmsLoop()
+        timerJob?.cancel()
+        connectTimeoutJob?.cancel()
+        candidateBatchJob?.cancel()
+        roomPollJob?.cancel()
+        
+        stopRecordingService()
+        smsController.unregisterReceivers()
+        webRtcManager.cleanup()
+        signalingClient?.sendHangupAndDisconnect()
+        
+        try {
+            eglBase.release()
+        } catch (e: Exception) {
+            Log.w("CallRoom abhishek", "EglBase already released or failed")
+        }
+    }
+
+    private fun showSummaryDialog() {
+        if (_binding == null) {
+            // If already detached, just navigate
+            exitToDashboard()
+            return
+        }
+
+        val dialog = MaterialAlertDialogBuilder(requireContext())
+            .create()
+        val dialogBinding = DialogCallSummaryBinding.inflate(layoutInflater)
+        dialog.setView(dialogBinding.root)
+        dialog.setCancelable(false)
+
+        dialogBinding.tvSummaryPhone.text = contactPhone
+        dialogBinding.tvSummaryDuration.text = formatDuration(elapsedSeconds)
+        dialogBinding.tvSummaryBalance.text = formatDuration(remainingBalanceSeconds.coerceAtLeast(0))
+
+        dialogBinding.btnSummaryOk.setOnClickListener {
+            dialog.dismiss()
+            exitToDashboard()
+        }
+
+        dialog.show()
+    }
+
+    private fun exitToDashboard() {
+        (requireActivity() as? KioskMainActivity)?.navigateToFragment(DashboardFragment().apply {
+            arguments = Bundle().apply { putString("user_id", inmateId) }
+        }, false)
+    }
+
+    private fun deleteRoom() {
+        roomId?.let { id ->
+            lifecycleScope.launch {
+                try {
+                    DbService.deleteByColumn("call_rooms", "room_id", id)
+                    Log.d("CallRoom abhishek", "Room deleted: $id")
+                } catch (ex: Exception) {
+                    Log.e("CallRoom abhishek", "Failed to delete room", ex)
+                }
             }
         }
+    }
 
-        if (isServiceBound) {
-            requireContext().unbindService(serviceConnection)
-            isServiceBound = false
-        }
-        eglBase.release()
+    override fun onDestroyView() {
+        Log.d("CallRoom abhishek", "onDestroyView called")
+        releaseResources()
+        super.onDestroyView()
         _binding = null
     }
 }

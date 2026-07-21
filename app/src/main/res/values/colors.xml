@@ -3,17 +3,22 @@
     <!-- Brand Premium Colors -->
     <color name="brand_primary">#1A56DB</color>       <!-- Deep Sapphire Blue -->
     <color name="brand_primary_dark">#1E40AF</color>  <!-- Shadow Blue -->
+    <color name="brand_primary_light">#60A5FA</color> <!-- Light Sky Blue (for Dark Mode) -->
     <color name="brand_secondary">#06B6D4</color>     <!-- Sleek Cyan -->
 
     <!-- Neutral Colors -->
     <color name="surface_light">#F9FAFB</color>       <!-- Soft Off-White (iOS Style) -->
-    <color name="text_dark">#111827</color>           <!-- Charcoal Black (Pure black nahi hai, jisse premium lagta hai) -->
-    <color name="text_muted">#6B7280</color>          <!-- Slate Grey (Subtle text ke liye) -->
+    <color name="surface_dark">#111827</color>        <!-- Dark Charcoal -->
+    <color name="surface_variant_dark">#1F2937</color> <!-- Dark Grey Variant -->
+    <color name="text_dark">#111827</color>           <!-- Charcoal Black -->
+    <color name="text_light">#F9FAFB</color>          <!-- Off-White -->
+    <color name="text_muted">#6B7280</color>          <!-- Slate Grey -->
+    <color name="text_muted_light">#9CA3AF</color>    <!-- Lighter Slate for Dark Mode -->
 
     <!-- Utility -->
     <color name="white">#FFFFFF</color>
     <color name="black">#000000</color>
-    <color name="transparent">#D9FFFFFF</color>
+    <color name="transparent_white">#D9FFFFFF</color>
     <color name="premium_error">#E11D48</color>       <!-- Smooth Rose Red (Logout button ke liye) -->
 
     <color name="primary">#5FC760</color>

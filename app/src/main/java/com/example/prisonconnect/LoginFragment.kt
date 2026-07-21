@@ -37,12 +37,42 @@ class LoginFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        // Show keypad directly — Supabase Postgrest works with the anon key,
-        // no anonymous authentication needed.
-        binding.llPinContainer.visibility = View.VISIBLE
-        binding.glButtons.visibility = View.VISIBLE
-        binding.progressBar.visibility = View.GONE
-        binding.tvWelcome.visibility = View.GONE
+        // Check if user is already logged in (secure session persistence)
+        val sharedPref = requireActivity().getSharedPreferences("PrisonPrefs", Context.MODE_PRIVATE)
+        val savedUserId = sharedPref.getString("logged_in_user", null)
+        
+        if (savedUserId != null) {
+            // User is already logged in, go directly to PIN entry
+            lifecycleScope.launch {
+                try {
+                    val user: User? = DbService.getDocument(table = "users", id = savedUserId)
+                    if (user != null && user.account_status == "active") {
+                        verifiedUserId = savedUserId
+                        userFullName = user.full_name.ifEmpty { "Inmate" }
+                        serverPinHash = user.pin_hash
+                        
+                        mode = EntryMode.PIN
+                        enteredPin = ""
+                        updatePinDisplay()
+                        binding.tvTitle.text = "Enter PIN"
+                        binding.tvWelcome.text = "Welcome, $userFullName"
+                        binding.tvWelcome.visibility = View.VISIBLE
+                        binding.btnChangePrisoner.visibility = View.VISIBLE
+                        binding.llPinContainer.visibility = View.VISIBLE
+                        binding.glButtons.visibility = View.VISIBLE
+                    } else {
+                        // User not found or inactive, show prisoner ID screen
+                        showPrisonerIdScreen()
+                    }
+                } catch (e: Exception) {
+                    // If there's an error, show prisoner ID screen
+                    showPrisonerIdScreen()
+                }
+            }
+        } else {
+            // Show prisoner ID screen
+            showPrisonerIdScreen()
+        }
 
         setupPinPad()
         updatePinDisplay()
@@ -50,7 +80,20 @@ class LoginFragment : Fragment() {
         binding.btnChangePrisoner.setOnClickListener { resetToPrisonerId() }
     }
 
+    private fun showPrisonerIdScreen() {
+        binding.llPinContainer.visibility = View.VISIBLE
+        binding.glButtons.visibility = View.VISIBLE
+        binding.progressBar.visibility = View.GONE
+        binding.tvWelcome.visibility = View.GONE
+        binding.btnChangePrisoner.visibility = View.GONE
+        binding.tvTitle.text = "Enter Prisoner ID"
+    }
+
     private fun resetToPrisonerId() {
+        // Clear the saved user session
+        val sharedPref = requireActivity().getSharedPreferences("PrisonPrefs", Context.MODE_PRIVATE)
+        sharedPref.edit().remove("logged_in_user").apply()
+        
         verifiedUserId = null
         serverPinHash = null
         userFullName = null

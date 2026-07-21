@@ -44,7 +44,7 @@
         android:layout_marginEnd="16dp"
         android:padding="0dp"
         android:contentDescription="Logout"
-        app:backgroundTint="@color/transparent"
+        app:backgroundTint="@android:color/transparent"
         app:icon="@drawable/ic_logout"
         app:iconTint="?attr/colorError"
         app:iconSize="22dp"
@@ -168,5 +168,14 @@
         app:layout_constraintTop_toBottomOf="@+id/tv_contacts_label"
         app:layout_constraintVertical_bias="0.25" />
 
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fab_dialer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_margin="24dp"
+        android:contentDescription="Open Dialer"
+        android:src="@drawable/ic_call"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

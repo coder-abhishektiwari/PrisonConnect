@@ -56,6 +56,7 @@ dependencies {
     implementation(libs.supabase.postgrest)
     implementation(libs.supabase.storage)
     implementation(libs.supabase.realtime)
+    implementation(libs.supabase.functions)
     implementation(libs.kotlinx.serialization.json)
     
     // Ktor (required by Supabase SDK for HTTP client engine)

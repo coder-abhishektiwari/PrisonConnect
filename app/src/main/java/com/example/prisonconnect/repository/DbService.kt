@@ -10,18 +10,12 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.putJsonObject
 
-/**
- * Centralized database service replacing FirebaseFirestore.
- * All calls route through SupabaseConfig.client (Supabase Postgrest).
- */
 object DbService {
 
     @PublishedApi
     internal val client get() = SupabaseConfig.client
 
-    // ─────────────────────────────────────────
     //  READ: Get a single document by ID (UUID)
-    // ─────────────────────────────────────────
     suspend inline fun <reified T : Any> getDocument(
         table: String,
         id: String
@@ -34,10 +28,9 @@ object DbService {
         }.decodeSingleOrNull<T>()
     }
 
-    // ─────────────────────────────────────────
     //  READ: Get a single document by any column
     //  (e.g. query call_rooms by room_id TEXT column)
-    // ─────────────────────────────────────────
+
     suspend inline fun <reified T : Any> getDocumentByColumn(
         table: String,
         column: String,
@@ -51,9 +44,7 @@ object DbService {
         }.decodeSingleOrNull<T>()
     }
 
-    // ─────────────────────────────────────────
     //  READ: Query documents with an equality filter
-    // ─────────────────────────────────────────
     suspend inline fun <reified T : Any> queryDocuments(
         table: String,
         field: String,
@@ -66,9 +57,7 @@ object DbService {
         }.decodeList<T>()
     }
 
-    // ─────────────────────────────────────────
     //  READ: Get all documents from a table
-    // ─────────────────────────────────────────
     suspend inline fun <reified T : Any> getAllDocuments(
         table: String,
         orderBy: String? = null,
@@ -79,9 +68,7 @@ object DbService {
         }.decodeList<T>()
     }
 
-    // ─────────────────────────────────────────
     //  WRITE: Upsert a document (insert or update)
-    // ─────────────────────────────────────────
     suspend inline fun <reified T : Any> upsertDocument(
         table: String,
         body: T
@@ -89,9 +76,7 @@ object DbService {
         client.from(table).upsert(listOf(body))
     }
 
-    // ─────────────────────────────────────────
     //  WRITE: Insert a document
-    // ─────────────────────────────────────────
     suspend inline fun <reified T : Any> insertDocument(
         table: String,
         body: T
@@ -99,10 +84,8 @@ object DbService {
         client.from(table).insert(listOf(body))
     }
 
-    // ─────────────────────────────────────────
     //  WRITE: Insert raw data as JsonObject
     //  (for dynamic maps that can't be @Serializable)
-    // ─────────────────────────────────────────
     suspend fun insertRaw(
         table: String,
         data: Map<String, Any>
@@ -115,10 +98,8 @@ object DbService {
         client.from(table).insert(listOf(jsonObject))
     }
 
-    // ─────────────────────────────────────────
     //  WRITE: Update specific fields by UUID id
     //  Uses JsonObject to avoid serialization issues with Map<String, Any>
-    // ─────────────────────────────────────────
     suspend fun updateFields(
         table: String,
         id: String,
@@ -136,10 +117,8 @@ object DbService {
         }
     }
 
-    // ─────────────────────────────────────────
     //  WRITE: Update specific fields by any column
     //  (e.g. update call_rooms where room_id = 'xxx')
-    // ─────────────────────────────────────────
     suspend fun updateFieldsByColumn(
         table: String,
         column: String,
@@ -158,9 +137,7 @@ object DbService {
         }
     }
 
-    // ─────────────────────────────────────────
     //  DELETE: Remove a document
-    // ─────────────────────────────────────────
     suspend fun deleteDocument(
         table: String,
         id: String
@@ -172,14 +149,22 @@ object DbService {
         }
     }
 
-    // ─────────────────────────────────────────
-    //  Real-time listener (polling-based fallback)
-    // ─────────────────────────────────────────
-    inline fun <reified T : Any> documentFlow(
+    //  DELETE: Remove a document by any column
+    //  (e.g. delete call_rooms where room_id = 'xxx')
+    suspend fun deleteByColumn(
         table: String,
-        id: String,
-        pollIntervalMs: Long = 3000L
-    ): kotlinx.coroutines.flow.Flow<T?> {
+        column: String,
+        value: String
+    ): Unit = withContext(Dispatchers.IO) {
+        client.from(table).delete {
+            filter {
+                eq(column, value)
+            }
+        }
+    }
+
+    //  Real-time listener (polling-based fallback)
+    inline fun <reified T : Any> documentFlow(table: String, id: String, pollIntervalMs: Long = 3000L): kotlinx.coroutines.flow.Flow<T?> {
         return kotlinx.coroutines.flow.flow {
             while (true) {
                 val doc: T? = getDocument(table, id)
@@ -189,12 +174,7 @@ object DbService {
         }
     }
 
-    inline fun <reified T : Any> queryFlow(
-        table: String,
-        field: String,
-        value: Any,
-        pollIntervalMs: Long = 3000L
-    ): kotlinx.coroutines.flow.Flow<List<T>> {
+    inline fun <reified T : Any> queryFlow(table: String, field: String, value: Any, pollIntervalMs: Long = 3000L): kotlinx.coroutines.flow.Flow<List<T>> {
         return kotlinx.coroutines.flow.flow {
             while (true) {
                 val docs: List<T> = queryDocuments(table, field, value)
@@ -204,9 +184,7 @@ object DbService {
         }
     }
 
-    // ─────────────────────────────────────────
     //  Helper: Convert Any to JsonElement
-    // ─────────────────────────────────────────
     private fun jsonValue(value: Any?): kotlinx.serialization.json.JsonElement {
         return when (value) {
             null -> JsonPrimitive("")

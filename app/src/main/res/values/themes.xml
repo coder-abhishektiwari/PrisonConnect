@@ -3,7 +3,7 @@
         <!-- Main Brand Colors -->
         <item name="colorPrimary">@color/brand_primary</item>
         <item name="colorOnPrimary">@color/white</item>
-        <item name="colorPrimaryContainer">#EFF6FF</item> <!-- Header ka background ekdam light royal tint -->
+        <item name="colorPrimaryContainer">#EFF6FF</item>
         <item name="colorOnPrimaryContainer">@color/brand_primary</item>
 
         <!-- Secondary & Surface Colors -->
@@ -12,11 +12,12 @@
         <item name="colorSurface">@color/surface_light</item>
         <item name="colorOnSurface">@color/text_dark</item>
         <item name="colorOnSurfaceVariant">@color/text_muted</item>
-        <item name="colorSurfaceVariant">#F3F4F6</item> <!-- Card background ke liye light grey slate -->
+        <item name="colorSurfaceVariant">#F3F4F6</item>
 
         <!-- Status Bar -->
         <item name="android:statusBarColor">@color/brand_primary</item>
         <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowBackground">?attr/colorSurface</item>
 
         <!-- Error / Logout Button -->
         <item name="colorError">@color/premium_error</item>

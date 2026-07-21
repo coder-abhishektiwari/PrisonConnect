@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Secure Family Connection</title>
-
+    <title>PrisonConnect</title>
+    <link rel="icon" type="image/png" href="ic_icon.png">
     <!-- Supabase JS Standard Library CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
@@ -120,9 +120,14 @@
         }
         .btn:active{ transform: scale(0.98); }
         .btn:disabled{ opacity:0.4; cursor:not-allowed; }
+    
+    /* ---- Screen Error ---- */
+    #screen-error{ align-items:center; justify-content:center; text-align:center; gap:22px; }
+    #screen-error h1{ font-size:24px; color:var(--red); }
+    #screen-error p{ font-size:14px; color:var(--text-dim); }
 
-        /* ---- Screen 5: Connected Call ---- */
-        #screen-call{ padding:0; position:relative; background:#04100F; }
+    /* ---- Screen 5: Connected Call ---- */
+    #screen-call{ padding:0; position:relative; background:#04100F; }
         .video-wrap{ position:relative; flex:1; }
         video{ width:100%; height:100%; object-fit:cover; background:#03100E; }
         #remoteVideo{ position:absolute; inset:0; width:100%; height:100%; }
@@ -176,8 +181,14 @@
 <div class="device">
     <div class="topbar">
         <div class="badge"></div>
-        <div class="label" id="roomLabel">Secure Facility Link&nbsp; · &nbsp;<b id="roomText">Loading...</b></div>
+        <div class="label" id="roomLabel">Secure Facility Link&nbsp; &middot; &nbsp;<b id="roomText">Loading...</b></div>
     </div>
+
+    <!-- SCREEN Error - Room not found -->
+    <section id="screen-error" class="screen">
+        <h1>Room Not Found</h1>
+        <p>The call link is invalid or has expired. Please ask the inmate to initiate a new call.</p>
+    </section>
 
     <!-- SCREEN 4a — Landing / Auto OTP Verify -->
     <section id="screen-landing" class="screen active">
@@ -203,7 +214,7 @@
             <input maxlength="1" inputmode="numeric" />
         </div>
         <div class="otp-error" id="otpError"></div>
-        <button class="btn" id="verifyBtn">Verify &amp; Join Call</button>
+        <button class="btn" id="verifyBtn">Verify & Join Call</button>
         <div class="resend-row">
             <span>Didn't get a code?</span>
             <button id="resendBtn">Resend OTP</button>
@@ -219,7 +230,7 @@
             <div class="call-meta">
                 <div>
                     <div class="timer" id="callTimer">00:00</div>
-                    <div class="consent-note">Kiosk 04A · Encrypted (SRTP)</div>
+                    <div class="consent-note">Kiosk 04A &middot; Encrypted (SRTP)</div>
                 </div>
                 <button class="hangup" id="hangupBtn">
                     <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M3 8.5C3 8.5 6 5 12 5s9 3.5 9 3.5l-3 3.5-3-1.5-1 2.5h-4l-1-2.5-3 1.5-3-3.5z" transform="rotate(180 12 12)"/></svg>
@@ -241,11 +252,8 @@
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     // Handle routing - room ID comes from query parameter ?room=ROOM_ID
-    let roomId = '';
     const params = new URLSearchParams(location.search);
-    
-    // Check for room in query parameters (from .htaccess rewrite)
-    roomId = params.get('room') || '';
+    let roomId = params.get('room') || '';
     
     // If not in query params, try to get from URL path
     if (!roomId) {
@@ -259,15 +267,32 @@
     }
     
     const token = params.get('token') || '';
-    
+
+    // Early exit if no room ID - show error screen
     if (!roomId) {
-      log('ERROR: No room ID found in URL. Expected format: index.html?room=ROOM_ID', 'warn');
+      document.addEventListener('DOMContentLoaded', () => {
+        const log = (msg, cls = '') => {
+          const el = document.getElementById('consoleLog');
+          if (el) {
+            const line = document.createElement('div');
+            line.className = 'line ' + cls;
+            line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            el.appendChild(line);
+          }
+        };
+        log('ERROR: No room ID found in URL. Expected format: index.html?room=ROOM_ID', 'warn');
+      });
+      document.getElementById('roomText').textContent = 'Error';
+      document.getElementById('landingMeta').textContent = 'Invalid link';
+      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      document.getElementById('screen-error').classList.add('active');
+    } else {
+      document.getElementById('roomText').textContent = `Room ${roomId}`;
+      document.getElementById('landingMeta').textContent = `token: ${token} &middot; Authenticating Layer`;
     }
 
-    document.getElementById('roomText').textContent = `Room ${roomId}`;
-    document.getElementById('landingMeta').textContent = `token: ${token} · Authenticating Layer`;
-
-    let isSessionAuthorized = false; // Strictly guards startCall execution
+    let isSessionAuthorized = false;
+    let isCallActive = false;
 
     const log = (msg, cls = '') => {
       const el = document.getElementById('consoleLog');
@@ -296,8 +321,6 @@
           .maybeSingle();
 
         if (error || !data) return false;
-
-        // Check if token matches and room is in a valid state for auto-verification
         return data.token === tok && ['WAITING', 'OTP_SENT', 'ACTIVE'].includes(data.room_status);
       } catch (err) {
         return false;
@@ -307,7 +330,6 @@
     async function verifyOtpSecurely(code, room) {
       log(`Transmitting OTP validation tokens to RPC…`);
       try {
-        // Executes the DB function we created in Step 1
         const { data, error } = await supabaseClient
           .rpc('verify_room_otp', { target_room: room, input_otp: code });
 
@@ -320,6 +342,8 @@
 
     // Master Execution Flow on Init
     (async function initLanding() {
+      if (!roomId) return;
+      
       log(`Looking up room: ${roomId}`, 'ok');
       
       // Fetch room details including kiosk_id (retry up to 5 times)
@@ -340,6 +364,15 @@
           }
           
           if (data) {
+            // One-person-only check: if room is already ACTIVE or CONNECTED, reject
+            if (['ACTIVE', 'CONNECTED'].includes(data.room_status)) {
+              log('Room already in use by another person. Only one person allowed per call.', 'warn');
+              document.getElementById('screen-landing').innerHTML = `
+                <h1>Room Already in Use</h1>
+                <p style="color:var(--text-dim); max-width:280px;">This call link is already being used by another person. Only one person can join per call. Please ask the inmate to initiate a new call.</p>
+              `;
+              return;
+            }
             roomData = data;
             log(`✓ Connected to kiosk: ${data.kiosk_id || 'Unknown'}`, 'ok');
             break;
@@ -360,39 +393,27 @@
       if (!roomData) {
         log('✗ Room not found after retries. The link may be invalid or the room hasn\'t been created yet.', 'warn');
         log('Please check: 1) Room ID is correct, 2) Android app has created the room, 3) Internet connection', 'warn');
+        showScreen('screen-error');
         return;
       }
       
-      // Notify kiosk that link was opened
-      try {
-        const notifyChannel = supabaseClient.channel(`room_${roomId}`, {
-          config: { broadcast: { self: false } }
-        });
-        
-        await new Promise((resolve) => {
-          notifyChannel.subscribe((status) => {
-            if (status === 'SUBSCRIBED') {
-              notifyChannel.send({
-                type: 'broadcast',
-                event: 'site-opened',
-                payload: { 
-                  sender: 'web',
-                  kiosk_id: roomData?.kiosk_id || 'unknown',
-                  timestamp: new Date().toISOString()
-                }
-              });
-              setTimeout(() => {
-                supabaseClient.removeChannel(notifyChannel);
-                resolve(true);
-              }, 500);
-            }
-          });
-        });
-        
-        log('Kiosk notified that link was opened.', 'ok');
-      } catch (e) {
-        log('Failed to notify kiosk: ' + e.message, 'warn');
-      }
+      // CRITICAL FIX: Create and subscribe to a SINGLE persistent channel right after roomId is parsed
+      // This ensures we don't miss any broadcast events from the Android client
+      const roomChannel = supabaseClient.channel(`room_${roomId}`, {
+        config: { broadcast: { self: false } }
+      });
+      
+      // Notify kiosk that link was opened (through the persistent channel)
+      roomChannel.send({
+        type: 'broadcast',
+        event: 'site-opened',
+        payload: { 
+          sender: 'web',
+          kiosk_id: roomData?.kiosk_id || 'unknown',
+          timestamp: new Date().toISOString()
+        }
+      });
+      log('Kiosk notified that link was opened.', 'ok');
       
       // Update room status to OTP_SENT to trigger Android to send OTP SMS
       try {
@@ -409,151 +430,120 @@
       log('Initializing secure authentication gateway...', 'ok');
       showScreen('screen-otp');
       document.querySelectorAll('#otpInputs input')[0]?.focus();
+      
+      /* ======================================================================
+          3. OTP USER INTERACTION INTERFACE
+         ====================================================================== */
+      const otpInputs = [...document.querySelectorAll('#otpInputs input')];
+      otpInputs.forEach((inp, i) => {
+        inp.addEventListener('input', () => {
+          inp.value = inp.value.replace(/\D/g, '');
+          if (inp.value && i < otpInputs.length - 1) otpInputs[i + 1].focus();
+        });
+        inp.addEventListener('keydown', e => {
+          if (e.key === 'Backspace' && !inp.value && i > 0) otpInputs[i - 1].focus();
+        });
+      });
+
+      let resendUsed = false;
+      document.getElementById('resendBtn').addEventListener('click', () => {
+        if (resendUsed) return;
+        resendUsed = true;
+        const btn = document.getElementById('resendBtn');
+        btn.disabled = true;
+        btn.textContent = 'Code resent';
+        log('New OTP challenge requested.', 'warn');
+      });
+
+      document.getElementById('verifyBtn').addEventListener('click', async () => {
+        const code = otpInputs.map(i => i.value).join('');
+        const errEl = document.getElementById('otpError');
+        if (code.length < 6) { errEl.textContent = 'Enter all 6 digits.'; return; }
+        errEl.textContent = '';
+
+        const verifyBtn = document.getElementById('verifyBtn');
+        verifyBtn.disabled = true;
+
+        log(`Verifying entry stream credentials…`);
+        const otpSuccess = await verifyOtpSecurely(code, roomId);
+
+        if (otpSuccess) {
+          log('OTP tokens authenticated.', 'ok');
+          isSessionAuthorized = true;
+          
+          // Notify kiosk that OTP was verified (through the persistent channel)
+          roomChannel.send({
+            type: 'broadcast',
+            event: 'otp-verified',
+            payload: { 
+              sender: 'web',
+              timestamp: new Date().toISOString()
+            }
+          });
+          log('Kiosk notified of OTP verification.', 'ok');
+          
+          // Start the call (will use the same roomChannel)
+          startCall(roomChannel);
+        } else {
+          errEl.textContent = 'Incorrect code. Please try again.';
+          log('Validation failed: Unauthorized entry bypass blocked.', 'warn');
+          otpInputs.forEach(i => i.value = '');
+          otpInputs[0].focus();
+          verifyBtn.disabled = false;
+        }
+      });
     })();
-
-    /* ======================================================================
-        3. OTP USER INTERACTION INTERFACE
-       ====================================================================== */
-    const otpInputs = [...document.querySelectorAll('#otpInputs input')];
-    otpInputs.forEach((inp, i) => {
-      inp.addEventListener('input', () => {
-        inp.value = inp.value.replace(/\D/g, '');
-        if (inp.value && i < otpInputs.length - 1) otpInputs[i + 1].focus();
-      });
-      inp.addEventListener('keydown', e => {
-        if (e.key === 'Backspace' && !inp.value && i > 0) otpInputs[i - 1].focus();
-      });
-    });
-
-    let resendUsed = false;
-    document.getElementById('resendBtn').addEventListener('click', () => {
-      if (resendUsed) return;
-      resendUsed = true;
-      const btn = document.getElementById('resendBtn');
-      btn.disabled = true;
-      btn.textContent = 'Code resent';
-      log('New OTP challenge requested.', 'warn');
-    });
-
-    document.getElementById('verifyBtn').addEventListener('click', async () => {
-      const code = otpInputs.map(i => i.value).join('');
-      const errEl = document.getElementById('otpError');
-      if (code.length < 6) { errEl.textContent = 'Enter all 6 digits.'; return; }
-      errEl.textContent = '';
-
-      const verifyBtn = document.getElementById('verifyBtn');
-      verifyBtn.disabled = true;
-
-      log(`Verifying entry stream credentials…`);
-      const otpSuccess = await verifyOtpSecurely(code, roomId);
-
-      if (otpSuccess) {
-        log('OTP tokens authenticated.', 'ok');
-        isSessionAuthorized = true;
-        
-        // Notify kiosk that OTP was verified
-        await notifyKioskOtpVerified();
-        
-        // Notify Android that web client has joined
-        await notifyAndroidJoined();
-        
-        startCall();
-      } else {
-        errEl.textContent = 'Incorrect code. Please try again.';
-        log('Validation failed: Unauthorized entry bypass blocked.', 'warn');
-        otpInputs.forEach(i => i.value = '');
-        otpInputs[0].focus();
-        verifyBtn.disabled = false;
-      }
-    });
 
     /* ======================================================================
         4. SUPABASE BROADCAST SIGNALING + WebRTC PIPELINE
        ====================================================================== */
     let timerHandle, seconds = 0;
     let localStream, peerConnection, callChannel;
-    let hasNotifiedAndroid = false;
+    let connectTimeoutHandle = null;
 
     const rtcConfig = {
       iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-      ]
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun1.l.google.com:19302" },
+        { urls: "stun:stun2.l.google.com:19302" },
+        { urls: "stun:stun.relay.metered.ca:80" },
+        {
+          urls: "turn:global.relay.metered.ca:80",
+          username: "57a73cc43754da4ba6357595",
+          credential: "q/qfur4DQF/CddhR",
+        },
+        {
+          urls: "turn:global.relay.metered.ca:80?transport=tcp",
+          username: "57a73cc43754da4ba6357595",
+          credential: "q/qfur4DQF/CddhR",
+        },
+        {
+          urls: "turn:global.relay.metered.ca:443",
+          username: "57a73cc43754da4ba6357595",
+          credential: "q/qfur4DQF/CddhR",
+        },
+        {
+          urls: "turns:global.relay.metered.ca:443?transport=tcp",
+          username: "57a73cc43754da4ba6357595",
+          credential: "q/qfur4DQF/CddhR",
+        }
+      ],
+      iceTransportPolicy: 'all',
+      bundlePolicy: 'max-bundle'
     };
 
-    async function notifyKioskOtpVerified() {
-      try {
-        const notifyChannel = supabaseClient.channel(`room_${roomId}`, {
-          config: { broadcast: { self: false } }
-        });
-        
-        await new Promise((resolve) => {
-          notifyChannel.subscribe((status) => {
-            if (status === 'SUBSCRIBED') {
-              notifyChannel.send({
-                type: 'broadcast',
-                event: 'otp-verified',
-                payload: { 
-                  sender: 'web',
-                  timestamp: new Date().toISOString()
-                }
-              });
-              setTimeout(() => {
-                supabaseClient.removeChannel(notifyChannel);
-                resolve(true);
-              }, 500);
-            }
-          });
-        });
-        
-        log('Kiosk notified of OTP verification.', 'ok');
-      } catch (e) {
-        log('Failed to notify kiosk of OTP: ' + e.message, 'warn');
-      }
-    }
-    
-    async function notifyAndroidJoined() {
-      if (hasNotifiedAndroid) return;
-      hasNotifiedAndroid = true;
-      
-      try {
-        // Create temporary channel to send web-joined event
-        const notifyChannel = supabaseClient.channel(`room_${roomId}`, {
-          config: { broadcast: { self: false } }
-        });
-        
-        await new Promise((resolve) => {
-          notifyChannel.subscribe((status) => {
-            if (status === 'SUBSCRIBED') {
-              notifyChannel.send({
-                type: 'broadcast',
-                event: 'web-joined',
-                payload: { sender: 'web' }
-              });
-              setTimeout(() => {
-                supabaseClient.removeChannel(notifyChannel);
-                resolve(true);
-              }, 500);
-            }
-          });
-        });
-        
-        log('Android notified of web client join.', 'ok');
-      } catch (e) {
-        log('Failed to notify Android: ' + e.message, 'warn');
-      }
-    }
-
-    async function startCall() {
-      // STRICT GATEWAY CHECK: Prevent accidental or asynchronous race conditions
+    async function startCall(roomChannel) {
       if (!isSessionAuthorized) {
         log('Security Violation: Call initiation rejected without active authorization.', 'warn');
         showScreen('screen-otp');
         return;
       }
 
+      // Store the channel reference
+      callChannel = roomChannel;
+
       showScreen('screen-call');
-      log(`Subscribing to safe channel stream: room_${roomId}…`);
+      log(`Using persistent channel: room_${roomId}…`);
 
       // Local Media Capture initialization
       try {
@@ -579,24 +569,31 @@
 
       peerConnection.ontrack = (event) => {
         log(`Remote ${event.track.kind} track received`, 'ok');
-        event.streams[0].getTracks().forEach(track => {
-          log(`Adding remote ${track.kind} track to remote stream`, 'ok');
-          remoteStream.addTrack(track);
-        });
+        const remoteVideo = document.getElementById('remoteVideo');
+
+        // Fix: Safe track assignment. Some browsers don't provide event.streams[0] immediately.
+        if (event.streams && event.streams[0]) {
+          remoteVideo.srcObject = event.streams[0];
+          log(`Track added via stream[0]`, 'ok');
+        } else {
+          log(`Stream[0] not found, creating new MediaStream for track`, 'ok');
+          if (!remoteVideo.srcObject) {
+            remoteVideo.srcObject = new MediaStream();
+          }
+          remoteVideo.srcObject.addTrack(event.track);
+        }
       };
 
-      // Connect to Supabase Secure Realtime Stream
-      callChannel = supabaseClient.channel(`room_${roomId}`, {
-        config: { broadcast: { self: false } }
-      });
+      // Pending ICE candidates queue for web
+      let webPendingCandidates = [];
+      let webRemoteDescSet = false;
 
       // Local ICE Candidate Dispatch - Batch candidates to avoid rate limits
       let pendingCandidates = [];
       let candidateBatchTimeout = null;
-      
+
       peerConnection.onicecandidate = (event) => {
         if (event.candidate && isSessionAuthorized) {
-          // Add to batch
           pendingCandidates.push({
             sdpMid: event.candidate.sdpMid,
             sdpMLineIndex: event.candidate.sdpMLineIndex,
@@ -605,12 +602,10 @@
           
           log(`ICE candidate queued (${pendingCandidates.length} pending)`, 'ok');
           
-          // Clear previous timeout
           if (candidateBatchTimeout) {
             clearTimeout(candidateBatchTimeout);
           }
           
-          // Send batch after 100ms delay
           candidateBatchTimeout = setTimeout(() => {
             if (pendingCandidates.length > 0) {
               const candidatesToSend = [...pendingCandidates];
@@ -631,13 +626,56 @@
         }
       };
 
-      // Process inbound signals only under absolute validation constraints
+      // Handle connection state changes for timeout
+      peerConnection.onconnectionstatechange = () => {
+        log(`Connection state: ${peerConnection.connectionState}`, 'ok');
+        if (peerConnection.connectionState === 'connected') {
+          if (connectTimeoutHandle) {
+            clearTimeout(connectTimeoutHandle);
+            connectTimeoutHandle = null;
+          }
+        } else if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'disconnected') {
+          if (connectTimeoutHandle) {
+            clearTimeout(connectTimeoutHandle);
+            connectTimeoutHandle = null;
+          }
+          log('Connection failed or disconnected', 'warn');
+          showScreen('screen-error');
+          document.querySelector('#screen-error h1').textContent = 'Connection Failed';
+          document.querySelector('#screen-error p').textContent = 'Could not establish connection with the kiosk. Please check your network and try again.';
+          const retryBtn = document.createElement('button');
+          retryBtn.className = 'btn';
+          retryBtn.textContent = 'Retry';
+          retryBtn.style.marginTop = '16px';
+          retryBtn.onclick = () => location.reload();
+          document.querySelector('#screen-error').appendChild(retryBtn);
+        }
+      };
+
+      // Process inbound signals
       callChannel
         .on('broadcast', { event: 'offer' }, async ({ payload }) => {
           if (payload.sender === 'android' && !peerConnection.currentRemoteDescription && isSessionAuthorized) {
             log('Android offer matrix captured. Executing handshake layers…');
 
             await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.offer));
+            webRemoteDescSet = true;
+            
+            if (webPendingCandidates.length > 0) {
+              log(`Processing ${webPendingCandidates.length} pending candidates`, 'ok');
+              for (const data of webPendingCandidates) {
+                const iceData = {
+                  candidate: data.candidate || data.sdp,
+                  sdpMid: data.sdpMid,
+                  sdpMLineIndex: data.sdpMLineIndex
+                };
+                if (iceData.candidate) {
+                  await peerConnection.addIceCandidate(new RTCIceCandidate(iceData));
+                }
+              }
+              webPendingCandidates = [];
+            }
+            
             const answer = await peerConnection.createAnswer();
             await peerConnection.setLocalDescription(answer);
 
@@ -653,13 +691,30 @@
           }
         })
         .on('broadcast', { event: 'candidates-batch' }, async ({ payload }) => {
-          if (payload.sender === 'android' && peerConnection.currentRemoteDescription && isSessionAuthorized) {
+          if (payload.sender === 'android' && isSessionAuthorized) {
             try {
               const candidates = payload.candidates || [];
               log(`Received ${candidates.length} candidates from Android`, 'ok');
               
-              for (const candidateData of candidates) {
-                await peerConnection.addIceCandidate(new RTCIceCandidate(candidateData));
+              const processCandidate = async (data) => {
+                // Robust mapping: standard is 'candidate', but we check 'sdp' for legacy support
+                const iceData = {
+                  candidate: data.candidate || data.sdp,
+                  sdpMid: data.sdpMid,
+                  sdpMLineIndex: data.sdpMLineIndex
+                };
+                if (iceData.candidate) {
+                  await peerConnection.addIceCandidate(new RTCIceCandidate(iceData));
+                }
+              };
+
+              if (webRemoteDescSet) {
+                for (const candidateData of candidates) {
+                  await processCandidate(candidateData);
+                }
+              } else {
+                webPendingCandidates = webPendingCandidates.concat(candidates);
+                log(`Queued ${candidates.length} candidates (waiting for offer)`, 'ok');
               }
             } catch (e) {
               console.error("Signal insertion failure", e);
@@ -686,6 +741,22 @@
               event: 'web-ready',
               payload: { sender: 'web' }
             });
+            
+            // Start connect timeout - if not connected within 25s, show error
+            connectTimeoutHandle = setTimeout(() => {
+              if (peerConnection && peerConnection.connectionState !== 'connected') {
+                log('Connect timeout reached (25s)', 'warn');
+                showScreen('screen-error');
+                document.querySelector('#screen-error h1').textContent = 'Connection Timeout';
+                document.querySelector('#screen-error p').textContent = 'Could not connect to the kiosk within 25 seconds. Please check your network and try again.';
+                const retryBtn = document.createElement('button');
+                retryBtn.className = 'btn';
+                retryBtn.textContent = 'Retry';
+                retryBtn.style.marginTop = '16px';
+                retryBtn.onclick = () => location.reload();
+                document.querySelector('#screen-error').appendChild(retryBtn);
+              }
+            }, 25000);
           }
         });
 
@@ -703,7 +774,8 @@
        ====================================================================== */
     document.getElementById('hangupBtn').addEventListener('click', async () => {
       clearInterval(timerHandle);
-      isSessionAuthorized = false; // Destroy authorization flag immediately on exit
+      isSessionAuthorized = false;
+      isCallActive = false;
 
       if (localStream) localStream.getTracks().forEach(t => t.stop());
       if (peerConnection) peerConnection.close();
@@ -717,13 +789,16 @@
         supabaseClient.removeChannel(callChannel);
       }
 
-      // Optional: Update Database status map
+      // Delete room from database
       try {
         await supabaseClient
-          .from('call_sessions')
-          .update({ status: 'DISCONNECTED' })
+          .from('call_rooms')
+          .delete()
           .eq('room_id', roomId);
-      } catch(e){}
+        log('Room deleted from database.', 'ok');
+      } catch(e) {
+        log('Failed to delete room: ' + e.message, 'warn');
+      }
 
       log('Media pipeline completely unmounted.', 'warn');
       document.querySelector('.call-meta').innerHTML = '<div class="timer">Call ended</div>';

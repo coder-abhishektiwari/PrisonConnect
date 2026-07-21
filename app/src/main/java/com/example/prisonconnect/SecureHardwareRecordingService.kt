@@ -15,7 +15,7 @@ import kotlin.time.Duration.Companion.milliseconds
 
 class SecureHardwareRecordingService : Service() {
 
-    private val TAG = "SecureRecordingService"
+    private val TAG = "SecureRecordingService abhishek"
     private val CHANNEL_ID = "SecureRecordingChannel"
     private val NOTIFICATION_ID = 101
 
@@ -86,7 +86,6 @@ class SecureHardwareRecordingService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Call Recording Active")
             .setContentText("Monitoring and recording the current session.")
-            // 🌟 Fixed: standard drawables fallback dynamic handling taaki build error na de
             .setSmallIcon(android.R.drawable.presence_video_online)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -94,7 +93,7 @@ class SecureHardwareRecordingService : Service() {
     }
 
     private fun startRecording() {
-        Log.d(TAG, "Starting secure recording...")
+        Log.d("TAG", "Starting secure recording...")
         isRecording = true
 
         val fileName = "rec_${System.currentTimeMillis()}.mp4"
@@ -109,6 +108,8 @@ class SecureHardwareRecordingService : Service() {
                         delay(1000.milliseconds)
                     }
                 }
+            } catch (e: CancellationException) {
+                Log.d(TAG, "Recording loop cancelled normally.")
             } catch (e: Exception) {
                 Log.e(TAG, "Recording ingestion failed: ${e.message}")
                 handleTamperDetected()
@@ -155,7 +156,16 @@ class SecureHardwareRecordingService : Service() {
         Log.d(TAG, "Stopping recording and initiating upload...")
         isRecording = false
 
-        val file = localFile ?: return
+        val file = localFile ?: run {
+            stopSelf()
+            return
+        }
+
+        if (!serviceJob.isActive) {
+            Log.w(TAG, "Scope already inactive, skipping upload")
+            stopSelf()
+            return
+        }
 
         serviceScope.launch {
             try {
@@ -167,21 +177,34 @@ class SecureHardwareRecordingService : Service() {
                     file = file
                 )
                 Log.d(TAG, "Upload successful. Wiping local file.")
-                if (file.delete()) {
+                if (file.exists()) {
+                    file.delete()
                     Log.d(TAG, "Local file wiped successfully.")
                 }
+            } catch (e: CancellationException) {
+                Log.d(TAG, "Upload job cancelled.")
             } catch (e: Exception) {
                 Log.e(TAG, "Upload failed: ${e.message}")
             } finally {
                 withContext(Dispatchers.Main) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
                 }
             }
         }
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        Log.d(TAG, "App task removed, stopping service...")
+        isRecording = false
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
+        Log.d(TAG, "Service being destroyed...")
         isRecording = false
         serviceJob.cancel()
     }
