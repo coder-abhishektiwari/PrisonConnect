@@ -180,6 +180,21 @@ class WebRtcManager(
             ?.let { enumerator.createCapturer(it, null) }
     }
 
+    fun switchCamera() {
+        val videoCapturer = videoCapturer as? CameraVideoCapturer ?: return
+        videoCapturer.switchCamera(null)
+    }
+
+    fun setAudioEnabled(enabled: Boolean) {
+        localAudioTrack?.setEnabled(enabled)
+    }
+
+    fun setSpeakerphoneOn(on: Boolean) {
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        audioManager.mode = android.media.AudioManager.MODE_IN_COMMUNICATION
+        audioManager.isSpeakerphoneOn = on
+    }
+
     fun cleanup() {
         Log.d("WebRtcManager", "Starting WebRTC cleanup...")
         try {
