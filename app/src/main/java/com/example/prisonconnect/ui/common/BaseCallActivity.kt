@@ -4,6 +4,10 @@ import android.content.*
 import android.os.Bundle
 import android.os.IBinder
 import android.util.Log
+import android.view.View
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -208,6 +212,11 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
             val smsLink =
                 "https://prisonconnect-call.rf.gd/index.html?room=$roomId&token=$roomToken"
 
+            // Update Lobby UI with link and OTP
+            withContext(Dispatchers.Main) {
+                updateLobbyWithCredentials(smsLink, roomOtp)
+            }
+
             val linkMessage =
                 "PrisonConnect: $typeStr call from $inmateName at $jailName. Join: $smsLink"
 
@@ -343,7 +352,8 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
     private fun createOfferInternal(pc: PeerConnection, iceRestart: Boolean) {
         val constraints = MediaConstraints().apply {
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
-            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", if (isVideoMode) "true" else "false"))
+            // Force true for both to ensure metadata is sent even in single-track modes
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
             if (iceRestart) {
                 mandatory.add(MediaConstraints.KeyValuePair("IceRestart", "true"))
             }
@@ -400,6 +410,39 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
                 }
             }
         }
+    }
+
+    private fun updateLobbyWithCredentials(link: String, otp: String) {
+        val llLink = findViewById<LinearLayout>(com.example.prisonconnect.R.id.ll_lobby_link)
+        val tvLink = findViewById<TextView>(com.example.prisonconnect.R.id.tv_lobby_link)
+        val btnCopyLink = findViewById<View>(com.example.prisonconnect.R.id.btn_copy_link)
+
+        val llOtp = findViewById<LinearLayout>(com.example.prisonconnect.R.id.ll_lobby_otp)
+        val tvOtp = findViewById<TextView>(com.example.prisonconnect.R.id.tv_lobby_otp)
+        val btnCopyOtp = findViewById<View>(com.example.prisonconnect.R.id.btn_copy_otp)
+
+        if (llLink != null && tvLink != null) {
+            tvLink.text = link
+            llLink.visibility = View.VISIBLE
+            btnCopyLink?.setOnClickListener {
+                copyToClipboard("Call Link", link)
+            }
+        }
+
+        if (llOtp != null && tvOtp != null) {
+            tvOtp.text = "OTP: $otp"
+            llOtp.visibility = View.VISIBLE
+            btnCopyOtp?.setOnClickListener {
+                copyToClipboard("OTP", otp)
+            }
+        }
+    }
+
+    private fun copyToClipboard(label: String, text: String) {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = ClipData.newPlainText(label, text)
+        clipboard.setPrimaryClip(clip)
+        Toast.makeText(this, "$label copied to clipboard", Toast.LENGTH_SHORT).show()
     }
 
     protected abstract fun updateLobbyStatus(message: String)
@@ -516,7 +559,7 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
             log("Executing deferred offer now that tracks are ready.")
             createOffer()
         } else {
-            // Standard flow if WebReady hasn't arrived yet
+            // Standard flow: tracks might be ready before WebReady
             createOffer()
         }
     }
@@ -529,9 +572,15 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
     }
 
     protected fun formatDuration(totalSeconds: Long): String {
-        val minutes = totalSeconds / 60
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
         val seconds = totalSeconds % 60
-        return "$minutes min $seconds sec"
+
+        return buildString {
+            if (hours > 0) append("$hours hr ")
+            if (minutes > 0 || hours > 0) append("$minutes min ")
+            append("$seconds sec")
+        }
     }
 
     override fun onDestroy() {

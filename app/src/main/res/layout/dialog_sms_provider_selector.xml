@@ -36,7 +36,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginEnd="8dp"
+            android:layout_marginEnd="6dp"
             android:clickable="true"
             android:focusable="true"
             app:cardCornerRadius="16dp"
@@ -48,28 +48,28 @@
                 android:layout_height="wrap_content"
                 android:gravity="center"
                 android:orientation="vertical"
-                android:padding="20dp">
+                android:padding="16dp">
 
                 <ImageView
                     android:id="@+id/iv_twilio"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
                     android:src="@drawable/ic_cloud_sms"
                     app:tint="@color/danger" />
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
+                    android:layout_marginTop="10dp"
                     android:text="Cloud"
-                    android:textSize="16sp"
+                    android:textSize="14sp"
                     android:textStyle="bold" />
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Twilio API"
-                    android:textSize="12sp"
+                    android:text="Twilio"
+                    android:textSize="11sp"
                     android:alpha="0.6" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
@@ -81,7 +81,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="8dp"
+            android:layout_marginHorizontal="3dp"
             android:clickable="true"
             android:focusable="true"
             app:cardCornerRadius="16dp"
@@ -93,28 +93,73 @@
                 android:layout_height="wrap_content"
                 android:gravity="center"
                 android:orientation="vertical"
-                android:padding="20dp">
+                android:padding="16dp">
 
                 <ImageView
                     android:id="@+id/iv_device"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
                     android:src="@drawable/ic_sim_card"
                     app:tint="@color/sms" />
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="SIM Card"
-                    android:textSize="16sp"
+                    android:layout_marginTop="10dp"
+                    android:text="SIM"
+                    android:textSize="14sp"
                     android:textStyle="bold" />
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Direct Carrier"
-                    android:textSize="12sp"
+                    android:text="Carrier"
+                    android:textSize="11sp"
+                    android:alpha="0.6" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Copy / Manual Card -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/card_copy"
+            style="?attr/materialCardViewElevatedStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:clickable="true"
+            android:focusable="true"
+            app:cardCornerRadius="16dp"
+            app:strokeWidth="2dp"
+            app:strokeColor="@android:color/transparent">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <ImageView
+                    android:id="@+id/iv_copy"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:src="@drawable/ic_copy_share"
+                    app:tint="?attr/colorPrimary" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="Copy"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Manual"
+                    android:textSize="11sp"
                     android:alpha="0.6" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>

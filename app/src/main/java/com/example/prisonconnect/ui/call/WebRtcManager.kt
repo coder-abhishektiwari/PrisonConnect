@@ -385,6 +385,19 @@ class WebRtcManager(
         @Suppress("DEPRECATION")
         audioManager.isSpeakerphoneOn = on
         logger.d("Speakerphone on: $on")
+        if (on) {
+            val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
+            audioManager.setStreamVolume(
+                AudioManager.STREAM_VOICE_CALL,
+                maxVolume,
+                0
+            )
+        }
+        logger.d(
+            "Speakerphone: $on, Volume: ${
+                audioManager.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
+            }"
+        )
     }
 
     fun cleanup() {

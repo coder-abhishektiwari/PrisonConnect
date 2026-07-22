@@ -98,7 +98,7 @@ class VideoCallActivity : BaseCallActivity<ActivityVideoCallBinding>() {
         binding.btnVideoMic.isActivated = isMicEnabled
         binding.btnVideoMic.alpha = if (isMicEnabled) 1f else 0.6f
 
-        if (isMicEnabled) {
+        if (!isMicEnabled) {
             binding.btnVideoMic.setIconResource(R.drawable.ic_mic)
             binding.btnVideoMic.setIconTintResource(R.color.white)
         } else {

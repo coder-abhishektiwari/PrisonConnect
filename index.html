@@ -482,6 +482,10 @@
         document.getElementById('verifyBtn').disabled = true;
         log('Verifying code...');
 
+        // Interaction-based unmute for audio/video playback
+        const remoteVideo = document.getElementById('remoteVideo');
+        if (remoteVideo) remoteVideo.muted = false;
+
         const { data: valid } = await supabaseClient.rpc('verify_room_otp', {
             target_room: roomId,
             input_otp: code
@@ -563,6 +567,10 @@
     async function startWebRtc(channel) {
       showScreen('screen-call');
 
+      const remoteVideo = document.getElementById('remoteVideo');
+      // Initially muted to bypass autoplay block until interaction completes
+      if (remoteVideo) remoteVideo.muted = true;
+
       const safeSend = (msg) => {
         try { channel.send(msg); } catch(e) { console.warn("Send failed", e); }
       };
@@ -599,7 +607,14 @@
         }
 
         peerConnection = new RTCPeerConnection(rtcConfig);
-        localStream.getTracks().forEach(t => peerConnection.addTrack(t, localStream));
+
+        // IMPORTANT: Attach local tracks so the phone can see the web media
+        if (localStream) {
+            localStream.getTracks().forEach(t => {
+                log("Adding local track to PC: " + t.kind);
+                peerConnection.addTrack(t, localStream);
+            });
+        }
 
         peerConnection.ontrack = (e) => {
           log("Remote track received: " + e.track.kind);
@@ -636,6 +651,8 @@
           }
         };
 
+        const iceCandidateQueue = [];
+
         // Signaling Handlers
         channel
           .on('broadcast', { event: 'offer' }, async ({ payload }) => {
@@ -649,13 +666,23 @@
               const answer = await peerConnection.createAnswer();
               await peerConnection.setLocalDescription(answer);
               safeSend({ type: 'broadcast', event: 'answer', payload: { sender: 'web', answer } });
+
+              // Flush queued candidates
+              while (iceCandidateQueue.length > 0) {
+                  const c = iceCandidateQueue.shift();
+                  peerConnection.addIceCandidate(new RTCIceCandidate(c)).catch(e => {});
+              }
             }
           })
           .on('broadcast', { event: 'candidates-batch' }, async ({ payload }) => {
             if (payload.sender === 'android') {
               payload.candidates.forEach(c => {
                  if (c.candidate) {
-                   peerConnection.addIceCandidate(new RTCIceCandidate(c)).catch(e => {});
+                    if (peerConnection.remoteDescription && peerConnection.remoteDescription.type) {
+                        peerConnection.addIceCandidate(new RTCIceCandidate(c)).catch(e => {});
+                    } else {
+                        iceCandidateQueue.push(c);
+                    }
                  }
               });
             }

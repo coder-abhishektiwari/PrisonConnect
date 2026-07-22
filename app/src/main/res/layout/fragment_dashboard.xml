@@ -112,7 +112,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="00:00:00 hours"
+                android:text="00 hr 00 min 00 sec"
                 android:textColor="?attr/colorOnSurface"
                 android:textSize="26sp"
                 android:textStyle="bold"

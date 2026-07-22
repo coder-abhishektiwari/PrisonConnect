@@ -103,7 +103,7 @@ class AudioCallActivity : BaseCallActivity<ActivityAudioCallBinding>() {
         binding.btnAudioMic.isActivated = isMicEnabled
         binding.btnAudioMic.alpha = if (isMicEnabled) 1f else 0.6f
 
-        if (isMicEnabled) {
+        if (!isMicEnabled) {
             binding.btnAudioMic.setIconResource(R.drawable.ic_mic)
             binding.btnAudioMic.setIconTintResource(R.color.white)
         } else {
@@ -127,7 +127,7 @@ class AudioCallActivity : BaseCallActivity<ActivityAudioCallBinding>() {
     }
 
     private fun showCallInfoTooltip() {
-        val info = "Inmate: $inmateName\nNumber: $contactPhone\nFacility: $jailName"
+        val info = "Name: $contactName\nNumber: $contactPhone"
         MaterialAlertDialogBuilder(this)
             .setTitle("Call Details")
             .setMessage(info)

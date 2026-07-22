@@ -133,10 +133,15 @@ class DashboardFragment : Fragment() {
     }
 
     private fun formatBalance(seconds: Long): String {
-        val h = seconds / 3600
-        val m = (seconds % 3600) / 60
-        val s = seconds % 60
-        return String.format("%02d:%02d:%02d Hours", h, m, s)
+        val hours = seconds / 3600
+        val minutes = (seconds % 3600) / 60
+        val secs = seconds % 60
+
+        return buildString {
+            if (hours > 0) append("$hours hr ")
+            if (minutes > 0 || hours > 0) append("$minutes min ")
+            append("$secs sec")
+        }
     }
 
     private fun launchCall(phone: String, type: String, contactName: String = "") {
@@ -208,9 +213,11 @@ class DashboardFragment : Fragment() {
             
             dialogBinding.cardTwilio.strokeColor = if (selectedMode == SmsMode.TWILIO) highlightColor else normalColor
             dialogBinding.cardDevice.strokeColor = if (selectedMode == SmsMode.DEVICE) highlightColor else normalColor
+            dialogBinding.cardCopy.strokeColor = if (selectedMode == SmsMode.LOG) highlightColor else normalColor
             
             dialogBinding.cardTwilio.alpha = if (selectedMode == SmsMode.TWILIO) 1.0f else 0.6f
             dialogBinding.cardDevice.alpha = if (selectedMode == SmsMode.DEVICE) 1.0f else 0.6f
+            dialogBinding.cardCopy.alpha = if (selectedMode == SmsMode.LOG) 1.0f else 0.6f
         }
 
         updateUi()
@@ -222,6 +229,11 @@ class DashboardFragment : Fragment() {
 
         dialogBinding.cardDevice.setOnClickListener {
             selectedMode = SmsMode.DEVICE
+            updateUi()
+        }
+
+        dialogBinding.cardCopy.setOnClickListener {
+            selectedMode = SmsMode.LOG
             updateUi()
         }
 

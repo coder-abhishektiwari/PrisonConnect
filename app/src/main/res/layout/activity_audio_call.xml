@@ -46,6 +46,71 @@
             android:indeterminate="true"
             android:indeterminateTint="?attr/colorPrimary" />
 
+        <!-- Link Copy Section -->
+        <LinearLayout
+            android:id="@+id/ll_lobby_link"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="32dp"
+            android:background="?attr/colorSurfaceVariant"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:padding="12dp"
+            android:visibility="gone"
+            app2:shapeAppearanceOverlay="@style/ShapeAppearance.Material3.Corner.Medium">
+
+            <TextView
+                android:id="@+id/tv_lobby_link"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="Generating link..."
+                android:textAppearance="?attr/textAppearanceBodySmall" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_copy_link"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                app2:icon="@drawable/ic_copy_share"
+                app2:iconSize="18dp"
+                app2:iconTint="?attr/colorPrimary" />
+        </LinearLayout>
+
+        <!-- OTP Copy Section -->
+        <LinearLayout
+            android:id="@+id/ll_lobby_otp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="?attr/colorSurfaceVariant"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:padding="12dp"
+            android:visibility="gone"
+            app2:shapeAppearanceOverlay="@style/ShapeAppearance.Material3.Corner.Medium">
+
+            <TextView
+                android:id="@+id/tv_lobby_otp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="OTP: ---"
+                android:textAppearance="?attr/textAppearanceTitleMedium"
+                android:textStyle="bold" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_copy_otp"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="8dp"
+                app2:icon="@drawable/ic_copy_share"
+                app2:iconSize="18dp"
+                app2:iconTint="?attr/colorPrimary" />
+        </LinearLayout>
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_cancel_call"
             style="@style/Widget.Material3.Button.OutlinedButton"
