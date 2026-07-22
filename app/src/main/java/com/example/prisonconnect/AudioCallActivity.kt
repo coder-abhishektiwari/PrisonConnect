@@ -1,7 +1,5 @@
 package com.example.prisonconnect
 
-import android.Manifest
-import android.annotation.SuppressLint
 import android.content.*
 import android.os.Bundle
 import android.os.IBinder
@@ -16,6 +14,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.prisonconnect.databinding.ActivityAudioCallBinding
 import com.example.prisonconnect.databinding.DialogCallSummaryBinding
+import com.example.prisonconnect.repository.DbService
 import com.example.prisonconnect.webrtc.CallDiagnosticHelper
 import com.example.prisonconnect.webrtc.CallViewModel
 import com.example.prisonconnect.webrtc.WebRtcManager
@@ -31,6 +30,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class AudioCallActivity : AppCompatActivity(), WebRtcManager.WebRtcListener {
 
     private val TAG = "AudioCallActivity"
+
     private lateinit var binding: ActivityAudioCallBinding
     private val viewModel: CallViewModel by viewModels()
 
@@ -41,17 +41,20 @@ class AudioCallActivity : AppCompatActivity(), WebRtcManager.WebRtcListener {
     private var contactPhone: String = ""
     private var jailName: String = ""
     private var initialBalance: Long = 0L
+    private var roomOtp: String = ""
+    private var roomToken: String = ""
+    private var isOtpSent: Boolean = false
 
     // WebRTC & Signaling
     private lateinit var webRtcManager: WebRtcManager
     private lateinit var smsController: SmsController
     private val eglBase = EglBase.create()
-    
+
     private var isCallStarted = AtomicBoolean(false)
     private var isOfferSent = AtomicBoolean(false)
     private var isRemoteDescriptionSet = false
     private val remoteCandidatesQueue = mutableListOf<IceCandidate>()
-    
+
     private var isSpeakerEnabled = false
 
     // Services & Helpers
@@ -65,6 +68,7 @@ class AudioCallActivity : AppCompatActivity(), WebRtcManager.WebRtcListener {
             recordingService = binder.getService()
             isServiceBound = true
         }
+
         override fun onServiceDisconnected(name: ComponentName?) {
             isServiceBound = false
         }
@@ -80,6 +84,14 @@ class AudioCallActivity : AppCompatActivity(), WebRtcManager.WebRtcListener {
         }
     }
 
+    private fun log(message: String, throwable: Throwable? = null) {
+        if (throwable != null) {
+            Log.e(TAG, message, throwable)
+        } else {
+            Log.d(TAG, message)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityAudioCallBinding.inflate(layoutInflater)
@@ -87,7 +99,7 @@ class AudioCallActivity : AppCompatActivity(), WebRtcManager.WebRtcListener {
 
         extractArguments()
         setupUI()
-        
+
         smsController = SmsController()
         webRtcManager = WebRtcManager(this, eglBase, this)
         diagnosticHelper = CallDiagnosticHelper(this)
@@ -112,12 +124,13 @@ class AudioCallActivity : AppCompatActivity(), WebRtcManager.WebRtcListener {
         contactPhone = intent.getStringExtra("phone_number") ?: ""
         jailName = intent.getStringExtra("jail_name") ?: ""
         initialBalance = intent.getLongExtra("initial_balance", 0L)
+        log("Extracted arguments: room=$roomId, inmate=$inmateId, phone=$contactPhone")
     }
 
     private fun setupUI() {
         binding.tvAudioName.text = inmateName
         binding.tvAudioPhone.text = contactPhone
-        
+
         binding.btnAudioHangup.setOnClickListener { confirmExit() }
         binding.btnAudioMic.setOnClickListener { toggleMic() }
         binding.btnAudioSpeaker.setOnClickListener { toggleSpeaker() }
@@ -125,31 +138,83 @@ class AudioCallActivity : AppCompatActivity(), WebRtcManager.WebRtcListener {
     }
 
     private fun checkPermissionsAndStart() {
-        val result = diagnosticHelper?.performFullDiagnostic(isVideo = false)
-        if (result is CallDiagnosticHelper.DiagnosticResult.Success) {
-            startCallFlow()
-        } else if (result is CallDiagnosticHelper.DiagnosticResult.PermissionMissing) {
-            permissionLauncher.launch(result.permissions.toTypedArray())
-        } else {
-            updateLobbyStatus("⚠️ Hardware diagnostic failed.")
+        when (val result = diagnosticHelper?.performFullDiagnostic(isVideo = false)) {
+            is CallDiagnosticHelper.DiagnosticResult.Success -> startCallFlow()
+            is CallDiagnosticHelper.DiagnosticResult.PermissionMissing -> {
+                permissionLauncher.launch(result.permissions.toTypedArray())
+            }
+            else -> {
+                updateLobbyStatus("⚠️ Hardware diagnostic failed.")
+            }
         }
     }
 
     private fun startCallFlow() {
-        lifecycleScope.launch(Dispatchers.Default) {
+        lifecycleScope.launch(Dispatchers.Main) {
             webRtcManager.initialize()
-            withContext(Dispatchers.Main) {
-                sendCallLink()
-            }
+            sendCallLink()
+        }
+    }
+
+    private suspend fun createRoomRecord(): Boolean {
+        if (roomId.isBlank() || inmateId.isBlank()) return false
+        return try {
+            roomOtp = (100000..999999).random().toString()
+            roomToken = "sess_${UUID.randomUUID().toString().replace("-", "")}"
+            val roomData: Map<String, Any> = mapOf(
+                "room_id" to roomId,
+                "kiosk_id" to "KIOSK_001",
+                "inmate_id" to inmateId,
+                "call_type" to "AUDIO",
+                "room_status" to "WAITING",
+                "receiver_phone" to contactPhone,
+                "otp" to roomOtp,
+                "token" to roomToken,
+                "webrtc_signaling" to mapOf(
+                    "offer" to null,
+                    "answer" to null,
+                    "iceCandidates" to emptyList<Map<String, Any>>()
+                )
+            )
+            DbService.insertRaw("call_rooms", roomData)
+            log("Room created in database: $roomId")
+            true
+        } catch (e: Exception) {
+            log("Failed to create room record", e)
+            false
         }
     }
 
     private fun sendCallLink() {
         lifecycleScope.launch {
-            val smsLink = "https://prisonconnect-call.rf.gd/index.html?room=$roomId&token=sess_${UUID.randomUUID().toString().replace("-", "")}"
+            val roomCreated = createRoomRecord()
+            if (!roomCreated) {
+                updateLobbyStatus("❌ Failed to initialize call room. Please try again.")
+                return@launch
+            }
+            val smsLink = "https://prisonconnect-call.rf.gd/index.html?room=$roomId&token=$roomToken"
             val linkMessage = "PrisonConnect: Audio call from $inmateName at $jailName. Join: $smsLink"
             smsController.sendSmsViaSupabase(contactPhone, linkMessage)
             updateLobbyStatus("📱 Call link sent to $contactPhone")
+            log("Call link sent to $contactPhone")
+        }
+    }
+
+    private suspend fun sendOtpSms() {
+        if (roomOtp.isBlank() || isOtpSent) return
+        isOtpSent = true
+        try {
+            val otpMessage = "PrisonConnect: Your access code is: $roomOtp"
+            val result = smsController.sendSmsViaSupabase(contactPhone, otpMessage)
+            if (!result.isSuccess) {
+                isOtpSent = false
+                log("Failed to send OTP SMS", result.exceptionOrNull())
+            } else {
+                log("OTP SMS sent to $contactPhone")
+            }
+        } catch (e: Exception) {
+            log("Failed to send OTP SMS", e)
+            isOtpSent = false
         }
     }
 
@@ -181,11 +246,17 @@ class AudioCallActivity : AppCompatActivity(), WebRtcManager.WebRtcListener {
     }
 
     private fun handleRoomStatus(status: String) {
+        log("Room status: $status")
         when (status) {
-            "WAITING" -> updateLobbyStatus("Waiting for terminal...")
-            "OTP_SENT" -> updateLobbyStatus("✅ Link opened! Sending code...")
+            "WAITING" -> updateLobbyStatus("Waiting for recipient...")
+            "OTP_SENT" -> {
+                updateLobbyStatus("✅ Link opened! Sending OTP...")
+                if (!isOtpSent) {
+                    lifecycleScope.launch { sendOtpSms() }
+                }
+            }
             "ACTIVE" -> {
-                updateLobbyStatus("🔐 Access verified! Connecting...")
+                updateLobbyStatus("🔐 Access verified! Connecting audio...")
                 activateWebRtc()
             }
             "CONNECTED" -> showCallUi()
@@ -195,7 +266,23 @@ class AudioCallActivity : AppCompatActivity(), WebRtcManager.WebRtcListener {
 
     private fun handleSignalingEvent(event: CallViewModel.SignalingEvent) {
         when (event) {
-            is CallViewModel.SignalingEvent.SiteOpened -> updateLobbyStatus("✅ Link opened!")
+            is CallViewModel.SignalingEvent.SiteOpened -> {
+                updateLobbyStatus("✅ Link opened!")
+                log("Site opened event received, sending OTP...")
+                lifecycleScope.launch {
+                    try {
+                        DbService.updateFieldsByColumn(
+                            "call_rooms",
+                            "room_id",
+                            roomId,
+                            mapOf("room_status" to "OTP_SENT")
+                        )
+                        sendOtpSms()
+                    } catch (e: Exception) {
+                        log("Failed to send OTP after site opened", e)
+                    }
+                }
+            }
             is CallViewModel.SignalingEvent.OtpVerified -> {
                 updateLobbyStatus("🔐 Access verified!")
                 activateWebRtc()
@@ -209,55 +296,85 @@ class AudioCallActivity : AppCompatActivity(), WebRtcManager.WebRtcListener {
 
     private fun activateWebRtc() {
         if (!isCallStarted.compareAndSet(false, true)) return
-        
+        log("Activating Audio WebRTC...")
+
         try {
+            // 1. Peer Connection setup
             webRtcManager.setupPeerConnection(isVideo = false)
+
+            // 2. Start local audio stream
             webRtcManager.startLocalStream(null, isVideo = false)
-            
+
             startRecordingService()
             showCallUi()
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to activate WebRTC", e)
+            log("Failed to activate WebRTC audio", e)
+            isCallStarted.set(false)
         }
     }
 
     private fun createOffer() {
-        val pc = webRtcManager.peerConnection ?: return
-        if (isOfferSent.compareAndSet(false, true)) {
-            val constraints = MediaConstraints().apply {
-                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
-                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "false"))
-            }
-            pc.createOffer(object : SdpObserver {
-                override fun onCreateSuccess(sdp: SessionDescription) {
-                    pc.setLocalDescription(object : SdpObserver {
-                        override fun onSetSuccess() { viewModel.sendOffer(sdp.description, sdp.type.canonicalForm()) }
-                        override fun onCreateSuccess(p0: SessionDescription?) {}
-                        override fun onCreateFailure(p0: String?) {}
-                        override fun onSetFailure(p0: String?) {}
-                    }, sdp)
-                }
-                override fun onSetSuccess() {}
-                override fun onCreateFailure(p0: String?) {}
-                override fun onSetFailure(p0: String?) {}
-            }, constraints)
+        val pc = webRtcManager.currentPeerConnection ?: return
+        if (!isOfferSent.compareAndSet(false, true)) return
+
+        log("Creating Audio Offer...")
+        val constraints = MediaConstraints().apply {
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "false"))
         }
+
+        pc.createOffer(object : SdpObserver {
+            override fun onCreateSuccess(sdp: SessionDescription) {
+                pc.setLocalDescription(object : SdpObserver {
+                    override fun onSetSuccess() {
+                        viewModel.sendOffer(sdp.description, sdp.type.canonicalForm())
+                        log("Audio Offer created and sent successfully")
+                    }
+
+                    override fun onCreateSuccess(p0: SessionDescription?) {}
+                    override fun onCreateFailure(error: String?) {
+                        log("Failed to set local description: $error")
+                        isOfferSent.set(false)
+                    }
+                    override fun onSetFailure(error: String?) {
+                        log("Failed to set local description: $error")
+                        isOfferSent.set(false)
+                    }
+                }, sdp)
+            }
+
+            override fun onSetSuccess() {}
+            override fun onCreateFailure(error: String?) {
+                log("Failed to create offer: $error")
+                isOfferSent.set(false)
+            }
+            override fun onSetFailure(error: String?) {}
+        }, constraints)
     }
 
     private fun setRemoteDescription(sdp: String, type: String) {
-        val pc = webRtcManager.peerConnection ?: return
-        val sessionDescription = SessionDescription(SessionDescription.Type.fromCanonicalForm(type), sdp)
+        val pc = webRtcManager.currentPeerConnection ?: return
+        val sessionDescription = SessionDescription(
+            SessionDescription.Type.fromCanonicalForm(type),
+            sdp
+        )
         pc.setRemoteDescription(object : SdpObserver {
             override fun onSetSuccess() {
+                log("Remote description set successfully")
                 isRemoteDescriptionSet = true
                 synchronized(remoteCandidatesQueue) {
                     remoteCandidatesQueue.forEach { pc.addIceCandidate(it) }
                     remoteCandidatesQueue.clear()
                 }
             }
+
             override fun onCreateSuccess(p0: SessionDescription?) {}
-            override fun onCreateFailure(p0: String?) {}
-            override fun onSetFailure(p0: String?) {}
+            override fun onCreateFailure(p0: String?) {
+                log("Failed to create remote description: $p0")
+            }
+            override fun onSetFailure(p0: String?) {
+                log("Failed to set remote description: $p0")
+            }
         }, sessionDescription)
     }
 
@@ -265,13 +382,16 @@ class AudioCallActivity : AppCompatActivity(), WebRtcManager.WebRtcListener {
         candidates.forEach { data ->
             val sdpMid = data["sdpMid"]?.jsonPrimitive?.content
             val sdpMLineIndex = data["sdpMLineIndex"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-            val sdp = data["candidate"]?.jsonPrimitive?.content ?: data["sdp"]?.jsonPrimitive?.content
+            val sdp = data["candidate"]?.jsonPrimitive?.content
+                ?: data["sdp"]?.jsonPrimitive?.content
             if (sdp != null) {
                 val candidate = IceCandidate(sdpMid, sdpMLineIndex, sdp)
                 if (isRemoteDescriptionSet) {
-                    webRtcManager.peerConnection?.addIceCandidate(candidate)
+                    webRtcManager.currentPeerConnection?.addIceCandidate(candidate)
                 } else {
-                    synchronized(remoteCandidatesQueue) { remoteCandidatesQueue.add(candidate) }
+                    synchronized(remoteCandidatesQueue) {
+                        remoteCandidatesQueue.add(candidate)
+                    }
                 }
             }
         }
@@ -282,24 +402,35 @@ class AudioCallActivity : AppCompatActivity(), WebRtcManager.WebRtcListener {
         webRtcManager.setAudioEnabled(enabled)
         binding.btnAudioMic.isActivated = enabled
         binding.btnAudioMic.alpha = if (enabled) 1.0f else 0.6f
-        binding.btnAudioMic.setIconResource(if (enabled) R.drawable.ic_mic else R.drawable.ic_mic_off)
+
+        if (enabled) {
+            binding.btnAudioMic.setIconResource(R.drawable.ic_mic)
+            binding.btnAudioMic.setIconTintResource(R.color.white)
+        } else {
+            binding.btnAudioMic.setIconResource(R.drawable.ic_mic_off)
+            binding.btnAudioMic.setIconTintResource(R.color.danger)
+        }
     }
 
     private fun toggleSpeaker() {
         isSpeakerEnabled = !isSpeakerEnabled
         webRtcManager.setSpeakerphoneOn(isSpeakerEnabled)
-        binding.btnAudioSpeaker.alpha = if (isSpeakerEnabled) 1.0f else 0.5f
+        if (isSpeakerEnabled) binding.btnAudioSpeaker.setIconTintResource(R.color.primary) else binding.btnAudioSpeaker.setIconTintResource(R.color.white)
     }
 
     private fun updateLobbyStatus(message: String) {
-        binding.tvLobbyStatus.text = message
+        runOnUiThread {
+            binding.tvLobbyStatus.text = message
+        }
     }
 
     private fun showCallUi() {
-        binding.lobbyContainer.visibility = View.GONE
-        binding.audioCallUi.visibility = View.VISIBLE
-        webRtcManager.setSpeakerphoneOn(isSpeakerEnabled)
-        viewModel.startCallTimer()
+        runOnUiThread {
+            binding.lobbyContainer.visibility = View.GONE
+            binding.audioCallUi.visibility = View.VISIBLE
+            webRtcManager.setSpeakerphoneOn(isSpeakerEnabled)
+            viewModel.startCallTimer()
+        }
     }
 
     private fun showCallInfoTooltip() {
@@ -329,10 +460,15 @@ class AudioCallActivity : AppCompatActivity(), WebRtcManager.WebRtcListener {
     private fun releaseResources() {
         stopRecordingService()
         webRtcManager.cleanup()
-        try { eglBase.release() } catch (e: Exception) {}
+        try {
+            eglBase.release()
+        } catch (e: Exception) {
+            log("Error releasing EGL base", e)
+        }
     }
 
     private fun showSummaryDialog() {
+        if (isFinishing) return
         val dialogBinding = DialogCallSummaryBinding.inflate(layoutInflater)
         val dialog = MaterialAlertDialogBuilder(this)
             .setView(dialogBinding.root)
@@ -341,7 +477,9 @@ class AudioCallActivity : AppCompatActivity(), WebRtcManager.WebRtcListener {
 
         dialogBinding.tvSummaryPhone.text = contactPhone
         dialogBinding.tvSummaryDuration.text = formatDuration(viewModel.elapsedSeconds.value)
-        dialogBinding.tvSummaryBalance.text = formatDuration(viewModel.remainingBalance.value.coerceAtLeast(0))
+        dialogBinding.tvSummaryBalance.text = formatDuration(
+            viewModel.remainingBalance.value.coerceAtLeast(0)
+        )
         dialogBinding.btnSummaryOk.setOnClickListener {
             dialog.dismiss()
             finish()
@@ -370,6 +508,8 @@ class AudioCallActivity : AppCompatActivity(), WebRtcManager.WebRtcListener {
         stopService(Intent(this, SecureHardwareRecordingService::class.java))
     }
 
+    // --- WebRtcListener Implementation ---
+
     override fun onIceCandidateGenerated(candidate: IceCandidate) {
         viewModel.queueLocalCandidate(candidate)
     }
@@ -379,11 +519,11 @@ class AudioCallActivity : AppCompatActivity(), WebRtcManager.WebRtcListener {
     }
 
     override fun onIceConnectionFailed() {
-        Log.e(TAG, "ICE Connection Failed")
+        log("ICE Connection Failed")
     }
 
     override fun onRemoteVideoTrackReceived(videoTrack: VideoTrack) {
-        // Audio only, ignore
+        log("Remote video track received but ignored (audio call)")
     }
 
     private fun formatSeconds(totalSeconds: Long): String {

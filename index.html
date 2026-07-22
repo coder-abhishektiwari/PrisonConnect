@@ -67,7 +67,7 @@
         .screen{ flex:1; display:none; flex-direction:column; padding:32px 24px; }
         .screen.active{ display:flex; }
 
-        /* ---- Screen 4a: Landing / Auto-Verify ---- */
+        /* ---- Screen Landing ---- */
         #screen-landing{ align-items:center; justify-content:center; text-align:center; gap:22px; }
         .shield{
           width:76px; height:76px; border-radius:20px;
@@ -88,7 +88,7 @@
         .sub{ font-size:13.5px; color:var(--text-dim); max-width:280px; line-height:1.5; }
         .meta{ font-family:var(--mono); font-size:11px; color:var(--text-dim); background:rgba(255,255,255,0.03); border:1px solid var(--line); padding:8px 12px; border-radius:8px; }
 
-        /* ---- Screen 4b: Manual OTP ---- */
+        /* ---- Screen OTP ---- */
         #screen-otp{ justify-content:center; gap:20px; }
         .otp-inputs{ display:flex; gap:10px; justify-content:center; margin:6px 0 4px; }
         .otp-inputs input{
@@ -121,48 +121,96 @@
         .btn:active{ transform: scale(0.98); }
         .btn:disabled{ opacity:0.4; cursor:not-allowed; }
     
-    /* ---- Screen Error ---- */
-    #screen-error{ align-items:center; justify-content:center; text-align:center; gap:22px; }
-    #screen-error h1{ font-size:24px; color:var(--red); }
-    #screen-error p{ font-size:14px; color:var(--text-dim); }
+        /* ---- Screen Error ---- */
+        #screen-error{ align-items:center; justify-content:center; text-align:center; gap:22px; }
+        #screen-error h1{ font-size:24px; color:var(--red); }
+        #screen-error p{ font-size:14px; color:var(--text-dim); }
 
-    /* ---- Screen 5: Connected Call ---- */
-    #screen-call{ padding:0; position:relative; background:#04100F; }
-        .video-wrap{ position:relative; flex:1; }
-        video{ width:100%; height:100%; object-fit:cover; background:#03100E; }
-        #remoteVideo{ position:absolute; inset:0; width:100%; height:100%; }
+        /* ---- Screen Call (Unified Wrapper) ---- */
+        #screen-call{ padding:0; position:relative; background:#000; overflow:hidden; }
+        .video-wrap{ position:relative; height: 100%; width: 100%; display:flex; flex-direction:column; }
+        video{ width:100%; height:100%; object-fit:cover; background:#000; }
+        #remoteVideo{ position:absolute; inset:0; z-index: 1; }
         #localVideo{
-          position:absolute; width:104px; height:140px; right:16px; top:16px;
-          border-radius:14px; border:2px solid rgba(255,255,255,0.25);
+          position:absolute; width:110px; height:150px; right:16px; top:80px;
+          border-radius:14px; border:2px solid rgba(255,255,255,0.2);
           object-fit:cover; box-shadow:0 10px 24px rgba(0,0,0,0.4);
-          z-index: 10;
+          z-index: 10; cursor: move;
         }
+
+        /* Video Overlays (Android Style) */
+        .video-header{
+          position:absolute; top:0; left:0; right:0;
+          padding:20px;
+          background: linear-gradient(to bottom, rgba(0,0,0,0.6), transparent);
+          display:flex; flex-direction:column; align-items:center;
+          z-index: 20; transition: opacity 0.3s;
+        }
+        .video-footer{
+          position:absolute; bottom:0; left:0; right:0;
+          padding:24px 20px 40px;
+          background: linear-gradient(to top, rgba(0,0,0,0.6), transparent);
+          display:flex; align-items:center; justify-content:center; gap:24px;
+          z-index: 20; transition: opacity 0.3s;
+        }
+        .video-header .name{ font-size:18px; font-weight:bold; margin-bottom:4px; }
+        .video-header .timer{ font-family:var(--mono); font-size:16px; }
+        .video-header .balance{ font-size:12px; color:rgba(255,255,255,0.7); margin-top:2px; }
+
+        /* Audio UI (Android Style) */
+        #audioOnlyUI{
+          position:absolute; inset:0; z-index:5; background:var(--panel);
+          display:none; flex-direction:column; align-items:center; justify-content:space-between;
+          padding:40px 24px 60px; text-align:center;
+        }
+        .audio-label{ font-size:16px; color:var(--text-dim); }
+        .avatar-box{
+          width:180px; height:180px; border-radius:50%;
+          border:4px solid var(--teal-dim); padding:8px;
+          background: radial-gradient(circle, var(--panel-raised), var(--panel));
+        }
+        .avatar-box img{ width:100%; height:100%; border-radius:50%; object-fit:cover; border:2px solid var(--line); }
+        .audio-name{ font-size:26px; font-weight:bold; margin-top:24px; }
+        .audio-phone{ font-size:16px; color:var(--text-dim); margin-top:4px; }
+        .audio-timer{ font-family:var(--mono); font-size:32px; font-weight:bold; margin-top:24px; }
+        .audio-status{ color:var(--teal); font-size:14px; margin-top:8px; font-weight:600; }
+
+        /* Controls Components */
+        .ctrl-btn{
+          width:56px; height:56px; border-radius:50%;
+          background: rgba(255,255,255,0.1); backdrop-filter: blur(10px);
+          display:flex; align-items:center; justify-content:center;
+          border:1px solid rgba(255,255,255,0.1);
+          color: white; transition: background 0.2s;
+        }
+        .ctrl-btn:active{ background: rgba(255,255,255,0.2); }
+        .ctrl-btn.active{ background: var(--teal); color: #04211B; }
+        .ctrl-btn.danger{ background: var(--red); box-shadow: 0 8px 20px rgba(225,80,63,0.3); }
+        .ctrl-btn svg{ width:26px; height:26px; }
+
         .rec-pill{
           position:absolute; top:16px; left:16px;
           display:flex; align-items:center; gap:6px;
           background:rgba(0,0,0,0.5); backdrop-filter: blur(6px);
           padding:6px 10px 6px 8px; border-radius:999px;
-          font-size:11.5px; font-weight:600; letter-spacing:0.02em;
-          z-index: 10;
+          font-size:11px; font-weight:600; letter-spacing:0.02em;
+          z-index: 30; border: 1px solid rgba(255,255,255,0.1);
         }
         .rec-dot{ width:8px; height:8px; border-radius:50%; background:var(--red); animation: blink 1s ease-in-out infinite; }
         @keyframes blink{ 0%,100%{opacity:1;} 50%{opacity:0.25;} }
-        .call-meta{
-          position:absolute; bottom:0; left:0; right:0;
-          padding:18px 20px 24px;
-          background: linear-gradient(to top, rgba(0,0,0,0.75), transparent);
-          display:flex; align-items:center; justify-content:space-between;
-          z-index: 10;
+
+        /* Info Dialog Overlay */
+        #infoDialog{
+          position:fixed; inset:0; background:rgba(0,0,0,0.8);
+          display:none; align-items:center; justify-content:center; z-index:100; padding:20px;
         }
-        .timer{ font-family:var(--mono); font-size:15px; font-weight:600; }
-        .consent-note{ font-size:10.5px; color:var(--text-dim); margin-top:2px; }
-        .hangup{
-          width:56px; height:56px; border-radius:50%;
-          background: var(--red);
-          display:flex; align-items:center; justify-content:center;
-          box-shadow: 0 8px 20px rgba(225,80,63,0.4);
+        .dialog-card{
+          background:var(--panel-raised); border-radius:24px; padding:24px;
+          width:100%; max-width:320px; border:1px solid var(--line);
         }
-        .hangup svg{ width:22px; height:22px; }
+        .dialog-card h2{ font-size:20px; margin-bottom:16px; }
+        .dialog-card p{ font-size:14px; color:var(--text-dim); margin-bottom:8px; line-height:1.5; }
+        .dialog-card b{ color:var(--text); }
 
         .console{
           margin-top:auto;
@@ -174,6 +222,12 @@
         .console .line{ opacity:0.85; }
         .console .line.ok{ color: var(--teal); }
         .console .line.warn{ color: var(--amber); }
+
+        /* Layout modifications for mobile */
+        @media (max-width: 400px) {
+            body { padding: 0; }
+            .device { height: 100vh; border-radius: 0; border: none; max-width: 100vw; }
+        }
     </style>
 </head>
 <body>
@@ -184,26 +238,26 @@
         <div class="label" id="roomLabel">Secure Facility Link&nbsp; &middot; &nbsp;<b id="roomText">Loading...</b></div>
     </div>
 
-    <!-- SCREEN Error - Room not found -->
+    <!-- SCREEN Error -->
     <section id="screen-error" class="screen">
         <h1>Room Not Found</h1>
         <p>The call link is invalid or has expired. Please ask the inmate to initiate a new call.</p>
     </section>
 
-    <!-- SCREEN 4a — Landing / Auto OTP Verify -->
+    <!-- SCREEN Landing -->
     <section id="screen-landing" class="screen active">
         <div class="shield">
             <svg viewBox="0 0 24 24" fill="none" stroke="#1FBF9C" stroke-width="1.8"><path d="M12 2l8 4v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6l8-4z"/><path d="M9 12l2 2 4-4"/></svg>
         </div>
         <h1>Verifying secure connection</h1>
-        <p class="sub">You've received a video call request from a correctional facility. We're automatically confirming this number for the session.</p>
+        <p class="sub">You've received a call request from a correctional facility. We're automatically confirming this session.</p>
         <div class="spinner"></div>
         <div class="meta" id="landingMeta">Verifying routing signatures...</div>
     </section>
 
-    <!-- SCREEN 4b — Manual OTP fallback -->
+    <!-- SCREEN OTP -->
     <section id="screen-otp" class="screen">
-        <h1 style="text-align:center;">Enter the code we sent</h1>
+        <h1 style="text-align:center;">Enter access code</h1>
         <p class="sub" style="text-align:center; margin:0 auto;">Automatic verification didn't complete. Enter the 6-digit code sent to your phone via SMS.</p>
         <div class="otp-inputs" id="otpInputs">
             <input maxlength="1" inputmode="numeric" />
@@ -221,19 +275,58 @@
         </div>
     </section>
 
-    <!-- SCREEN 5 — Connected Call -->
+    <!-- SCREEN Call -->
     <section id="screen-call" class="screen">
-        <div class="video-wrap">
+        <div class="video-wrap" id="videoLayout">
             <video id="remoteVideo" autoplay playsinline></video>
             <video id="localVideo" autoplay playsinline muted></video>
-            <div class="rec-pill"><span class="rec-dot"></span> This call is recorded</div>
-            <div class="call-meta">
-                <div>
-                    <div class="timer" id="callTimer">00:00</div>
-                    <div class="consent-note">Kiosk 04A &middot; Encrypted (SRTP)</div>
+
+            <div class="rec-pill"><span class="rec-dot"></span> Recorded</div>
+
+            <div class="video-header" id="videoHeader">
+                <div class="name" id="videoName">Inmate Name</div>
+                <div class="timer" id="videoTimer">00:00:00</div>
+                <div class="balance" id="videoBalance">Bal: 00:00:00</div>
+            </div>
+
+            <div class="video-footer" id="videoFooter">
+                <button class="ctrl-btn" id="videoMicBtn" title="Mute/Unmute">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 14 3 14zM17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+                </button>
+                <button class="ctrl-btn danger" id="videoHangupBtn" title="Hang Up">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.58.9-.98.49-1.87 1.15-2.62 1.93-.19.19-.51.27-.77.27-.26 0-.51-.07-.71-.27L.29 13.5a.98.98 0 0 1 0-1.41C2.75 9.63 7.17 8 12 8s9.25 1.63 11.71 4.09a.98.98 0 0 1 0 1.41l-2.43 2.44c-.4.4-1.05.4-1.45.03-.75-.78-1.64-1.44-2.62-1.93-.35-.17-.58-.52-.58-.91v-3.1C15.15 9.25 13.6 9 12 9z"/></svg>
+                </button>
+                <button class="ctrl-btn" id="videoSwitchBtn" title="Switch Camera">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 4h-3.17L15 2H9L7.17 4H4C2.9 4 2 4.9 2 6v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 14c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+                </button>
+            </div>
+        </div>
+
+        <div id="audioOnlyUI">
+            <div class="audio-label">Secure Voice Call</div>
+
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+                <div class="avatar-box">
+                    <img id="audioAvatar" src="ic_icon.png" alt="Avatar" />
                 </div>
-                <button class="hangup" id="hangupBtn">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M3 8.5C3 8.5 6 5 12 5s9 3.5 9 3.5l-3 3.5-3-1.5-1 2.5h-4l-1-2.5-3 1.5-3-3.5z" transform="rotate(180 12 12)"/></svg>
+                <div class="audio-name" id="audioName">Inmate Name</div>
+                <div class="audio-phone" id="audioPhone">+91 0000000000</div>
+                <div class="audio-timer" id="audioTimer">00:00:00</div>
+                <div class="audio-status">Encrypted Connection</div>
+            </div>
+
+            <div class="video-footer" style="position:static; background:none; padding:0; gap:32px;">
+                <button class="ctrl-btn" id="audioSpeakerBtn" title="Speaker">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77zM3 9v6h4l5 5V3L7 8H3z"/></svg>
+                </button>
+                <button class="ctrl-btn" id="audioMicBtn" title="Mute">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 14 3 14zM17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+                </button>
+                <button class="ctrl-btn" id="audioInfoBtn" title="Info">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+                </button>
+                <button class="ctrl-btn danger" id="audioHangupBtn" title="Hang Up" style="position:absolute; bottom: -80px;">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.58.9-.98.49-1.87 1.15-2.62 1.93-.19.19-.51.27-.77.27-.26 0-.51-.07-.71-.27L.29 13.5a.98.98 0 0 1 0-1.41C2.75 9.63 7.17 8 12 8s9.25 1.63 11.71 4.09a.98.98 0 0 1 0 1.41l-2.43 2.44c-.4.4-1.05.4-1.45.03-.75-.78-1.64-1.44-2.62-1.93-.35-.17-.58-.52-.58-.91v-3.1C15.15 9.25 13.6 9 12 9z"/></svg>
                 </button>
             </div>
         </div>
@@ -242,199 +335,122 @@
     <div class="console" id="consoleLog" style="margin:12px 16px 16px;"></div>
 </div>
 
+<div id="infoDialog">
+    <div class="dialog-card">
+        <h2>Call Details</h2>
+        <p>Inmate: <b id="infoName">Loading...</b></p>
+        <p>Number: <b id="infoPhone">Loading...</b></p>
+        <p>Facility: <b id="infoJail">PrisonConnect Facility</b></p>
+        <button class="btn" style="margin-top:20px;" onclick="document.getElementById('infoDialog').style.display='none'">OK</button>
+    </div>
+</div>
+
 <script>
     /* ======================================================================
-        1. SUPABASE INITIALIZATION & ROUTING PARSING
+        1. SUPABASE INITIALIZATION & CONFIG
        ====================================================================== */
     const SUPABASE_URL = "https://vfqufosgzaatydvikuas.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_31-6_doFy14yTBlLKYil7g_Y0E3Gj7I";
 
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    // Handle routing - room ID comes from query parameter ?room=ROOM_ID
     const params = new URLSearchParams(location.search);
     let roomId = params.get('room') || '';
-    
-    // If not in query params, try to get from URL path
-    if (!roomId) {
-      const pathSegments = window.location.pathname.split('/').filter(segment => segment.length > 0);
-      const joinIndex = pathSegments.indexOf('join');
-      if (joinIndex !== -1 && pathSegments.length > joinIndex + 1) {
-        roomId = pathSegments[joinIndex + 1];
-      } else if (pathSegments.length > 0) {
-        roomId = pathSegments[pathSegments.length - 1];
-      }
-    }
-    
     const token = params.get('token') || '';
 
-    // Early exit if no room ID - show error screen
-    if (!roomId) {
-      document.addEventListener('DOMContentLoaded', () => {
-        const log = (msg, cls = '') => {
-          const el = document.getElementById('consoleLog');
-          if (el) {
-            const line = document.createElement('div');
-            line.className = 'line ' + cls;
-            line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-            el.appendChild(line);
-          }
-        };
-        log('ERROR: No room ID found in URL. Expected format: index.html?room=ROOM_ID', 'warn');
-      });
-      document.getElementById('roomText').textContent = 'Error';
-      document.getElementById('landingMeta').textContent = 'Invalid link';
-      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-      document.getElementById('screen-error').classList.add('active');
-    } else {
-      document.getElementById('roomText').textContent = `Room ${roomId}`;
-      document.getElementById('landingMeta').textContent = `token: ${token} &middot; Authenticating Layer`;
-    }
-
-    let isSessionAuthorized = false;
-    let isCallActive = false;
+    // UI Elements
+    const logEl = document.getElementById('consoleLog');
+    const screens = document.querySelectorAll('.screen');
+    const roomText = document.getElementById('roomText');
+    const landingMeta = document.getElementById('landingMeta');
 
     const log = (msg, cls = '') => {
-      const el = document.getElementById('consoleLog');
       const line = document.createElement('div');
       line.className = 'line ' + cls;
       line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-      el.appendChild(line);
-      el.scrollTop = el.scrollHeight;
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
     };
 
     function showScreen(id) {
-      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      screens.forEach(s => s.classList.remove('active'));
       document.getElementById(id).classList.add('active');
     }
 
+    if (!roomId) {
+      showScreen('screen-error');
+      roomText.textContent = 'Error';
+    } else {
+      roomText.textContent = `Room ${roomId}`;
+      landingMeta.textContent = `token: ${token.substring(0,8)}... &middot; Authenticating`;
+    }
+
     /* ======================================================================
-        2. REAL DATABASE CRYPTO AUTHENTICATION (SECURED)
+        2. MASTER SESSION FLOW
        ====================================================================== */
-    async function verifySessionToken(tok, room) {
-      log(`Checking auto-verify mapping tokens…`);
-      try {
-        const { data, error } = await supabaseClient
-          .from('call_rooms')
-          .select('token, room_status')
-          .eq('room_id', room)
-          .maybeSingle();
+    let roomData = null;
+    let isSessionAuthorized = false;
+    let currentCallType = 'VIDEO';
+    let inmateBalance = 0;
 
-        if (error || !data) return false;
-        return data.token === tok && ['WAITING', 'OTP_SENT', 'ACTIVE'].includes(data.room_status);
-      } catch (err) {
-        return false;
-      }
-    }
-
-    async function verifyOtpSecurely(code, room) {
-      log(`Transmitting OTP validation tokens to RPC…`);
-      try {
-        const { data, error } = await supabaseClient
-          .rpc('verify_room_otp', { target_room: room, input_otp: code });
-
-        if (error) return false;
-        return data === true;
-      } catch (err) {
-        return false;
-      }
-    }
-
-    // Master Execution Flow on Init
-    (async function initLanding() {
+    (async function init() {
       if (!roomId) return;
       
-      log(`Looking up room: ${roomId}`, 'ok');
+      log(`Connecting to room ${roomId}...`);
       
-      // Fetch room details including kiosk_id (retry up to 5 times)
-      let roomData = null;
-      const maxRetries = 5;
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-          log(`Attempt ${attempt}/${maxRetries}: Querying database...`, 'ok');
-          
-          const { data, error } = await supabaseClient
-            .from('call_rooms')
-            .select('kiosk_id, room_status, token')
-            .eq('room_id', roomId)
-            .maybeSingle();
-          
-          if (error) {
-            log(`Database error: ${error.message}`, 'warn');
-          }
-          
-          if (data) {
-            // One-person-only check: if room is already ACTIVE or CONNECTED, reject
-            if (['ACTIVE', 'CONNECTED'].includes(data.room_status)) {
-              log('Room already in use by another person. Only one person allowed per call.', 'warn');
-              document.getElementById('screen-landing').innerHTML = `
-                <h1>Room Already in Use</h1>
-                <p style="color:var(--text-dim); max-width:280px;">This call link is already being used by another person. Only one person can join per call. Please ask the inmate to initiate a new call.</p>
-              `;
-              return;
-            }
-            roomData = data;
-            log(`✓ Connected to kiosk: ${data.kiosk_id || 'Unknown'}`, 'ok');
-            break;
-          }
-          
-          if (attempt < maxRetries) {
-            log(`Room not found yet, retrying in 2 seconds...`, 'warn');
-            await new Promise(resolve => setTimeout(resolve, 2000));
-          }
-        } catch (e) {
-          log(`Exception on attempt ${attempt}: ${e.message}`, 'warn');
-          if (attempt < maxRetries) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
-          }
-        }
-      }
-      
-      if (!roomData) {
-        log('✗ Room not found after retries. The link may be invalid or the room hasn\'t been created yet.', 'warn');
-        log('Please check: 1) Room ID is correct, 2) Android app has created the room, 3) Internet connection', 'warn');
+      // Fetch Room & Inmate Data
+      const { data, error } = await supabaseClient
+        .from('call_rooms')
+        .select('*')
+        .eq('room_id', roomId)
+        .maybeSingle();
+
+      if (error || !data) {
+        log('Room not found or expired.', 'warn');
         showScreen('screen-error');
         return;
       }
-      
-      // CRITICAL FIX: Create and subscribe to a SINGLE persistent channel right after roomId is parsed
-      // This ensures we don't miss any broadcast events from the Android client
+
+      roomData = data;
+      currentCallType = data.call_type || 'VIDEO';
+
+      // Fetch Inmate Name & Balance
+      const { data: userData } = await supabaseClient
+        .from('users')
+        .select('full_name, balance_remaining_seconds')
+        .eq('id', data.inmate_id)
+        .maybeSingle();
+
+      roomData.inmate_name = userData?.full_name || 'Inmate';
+      inmateBalance = userData?.balance_remaining_seconds || 0;
+
+      // Update UI labels
+      document.getElementById('videoName').textContent = roomData.inmate_name;
+      document.getElementById('audioName').textContent = roomData.inmate_name;
+      document.getElementById('audioPhone').textContent = data.receiver_phone || 'Unknown';
+      document.getElementById('infoName').textContent = roomData.inmate_name;
+      document.getElementById('infoPhone').textContent = data.receiver_phone || 'Unknown';
+
+      log(`Found ${currentCallType} call from ${roomData.inmate_name}`, 'ok');
+
+      // Initialize Signaling Channel
       const roomChannel = supabaseClient.channel(`room_${roomId}`, {
         config: { broadcast: { self: false } }
       });
-      
-      // Notify kiosk that link was opened (through the persistent channel)
+
+      // Notify Link Opened
       roomChannel.send({
         type: 'broadcast',
         event: 'site-opened',
-        payload: { 
-          sender: 'web',
-          kiosk_id: roomData?.kiosk_id || 'unknown',
-          timestamp: new Date().toISOString()
-        }
+        payload: { sender: 'web' }
       });
-      log('Kiosk notified that link was opened.', 'ok');
-      
-      // Update room status to OTP_SENT to trigger Android to send OTP SMS
-      try {
-        await supabaseClient
-          .from('call_rooms')
-          .update({ room_status: 'OTP_SENT' })
-          .eq('room_id', roomId);
-        log('Requesting access code...', 'ok');
-      } catch (e) {
-        log('Failed to request access code.', 'warn');
-      }
-      
-      // SECURITY: Always require OTP verification
-      log('Initializing secure authentication gateway...', 'ok');
+
+      // Transition to OTP
       showScreen('screen-otp');
-      document.querySelectorAll('#otpInputs input')[0]?.focus();
-      
-      /* ======================================================================
-          3. OTP USER INTERACTION INTERFACE
-         ====================================================================== */
       const otpInputs = [...document.querySelectorAll('#otpInputs input')];
+      otpInputs[0].focus();
+
+      // OTP Logic
       otpInputs.forEach((inp, i) => {
         inp.addEventListener('input', () => {
           inp.value = inp.value.replace(/\D/g, '');
@@ -445,364 +461,245 @@
         });
       });
 
-      let resendUsed = false;
-      document.getElementById('resendBtn').addEventListener('click', () => {
-        if (resendUsed) return;
-        resendUsed = true;
-        const btn = document.getElementById('resendBtn');
-        btn.disabled = true;
-        btn.textContent = 'Code resent';
-        log('New OTP challenge requested.', 'warn');
-      });
-
-      document.getElementById('verifyBtn').addEventListener('click', async () => {
+      document.getElementById('verifyBtn').onclick = async () => {
         const code = otpInputs.map(i => i.value).join('');
-        const errEl = document.getElementById('otpError');
-        if (code.length < 6) { errEl.textContent = 'Enter all 6 digits.'; return; }
-        errEl.textContent = '';
+        if (code.length < 6) return;
 
-        const verifyBtn = document.getElementById('verifyBtn');
-        verifyBtn.disabled = true;
+        document.getElementById('verifyBtn').disabled = true;
+        log('Verifying code...');
 
-        log(`Verifying entry stream credentials…`);
-        const otpSuccess = await verifyOtpSecurely(code, roomId);
+        const { data: valid } = await supabaseClient.rpc('verify_room_otp', {
+            target_room: roomId,
+            input_otp: code
+        });
 
-        if (otpSuccess) {
-          log('OTP tokens authenticated.', 'ok');
+        if (valid) {
+          log('Access granted.', 'ok');
           isSessionAuthorized = true;
-          
-          // Notify kiosk that OTP was verified (through the persistent channel)
-          roomChannel.send({
-            type: 'broadcast',
-            event: 'otp-verified',
-            payload: { 
-              sender: 'web',
-              timestamp: new Date().toISOString()
-            }
-          });
-          log('Kiosk notified of OTP verification.', 'ok');
-          
-          // Start the call (will use the same roomChannel)
-          startCall(roomChannel);
+          roomChannel.send({ type: 'broadcast', event: 'otp-verified', payload: { sender: 'web' } });
+          startWebRtc(roomChannel);
         } else {
-          errEl.textContent = 'Incorrect code. Please try again.';
-          log('Validation failed: Unauthorized entry bypass blocked.', 'warn');
+          log('Incorrect code.', 'warn');
+          document.getElementById('otpError').textContent = 'Invalid code.';
           otpInputs.forEach(i => i.value = '');
           otpInputs[0].focus();
-          verifyBtn.disabled = false;
+          document.getElementById('verifyBtn').disabled = false;
         }
-      });
+      };
     })();
 
     /* ======================================================================
-        4. SUPABASE BROADCAST SIGNALING + WebRTC PIPELINE
+        3. WebRTC CORE
        ====================================================================== */
-    let timerHandle, seconds = 0;
-    let localStream, peerConnection, callChannel;
-    let connectTimeoutHandle = null;
+    let peerConnection, localStream, callTimer;
+    let seconds = 0;
+    let isMicMuted = false;
+    let currentFacingMode = 'user';
 
     const rtcConfig = {
-      iceServers: [
-        { urls: "stun:stun.l.google.com:19302" },
-        { urls: "stun:stun1.l.google.com:19302" },
-        { urls: "stun:stun2.l.google.com:19302" },
-        { urls: "stun:stun.relay.metered.ca:80" },
-        {
-          urls: "turn:global.relay.metered.ca:80",
-          username: "57a73cc43754da4ba6357595",
-          credential: "q/qfur4DQF/CddhR",
-        },
-        {
-          urls: "turn:global.relay.metered.ca:80?transport=tcp",
-          username: "57a73cc43754da4ba6357595",
-          credential: "q/qfur4DQF/CddhR",
-        },
-        {
-          urls: "turn:global.relay.metered.ca:443",
-          username: "57a73cc43754da4ba6357595",
-          credential: "q/qfur4DQF/CddhR",
-        },
-        {
-          urls: "turns:global.relay.metered.ca:443?transport=tcp",
-          username: "57a73cc43754da4ba6357595",
-          credential: "q/qfur4DQF/CddhR",
-        }
-      ],
-      iceTransportPolicy: 'all',
-      bundlePolicy: 'max-bundle'
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
     };
 
-    async function startCall(roomChannel) {
-      if (!isSessionAuthorized) {
-        log('Security Violation: Call initiation rejected without active authorization.', 'warn');
-        showScreen('screen-otp');
-        return;
-      }
+    function formatTime(totalSeconds) {
+      const h = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+      const m = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+      const s = String(totalSeconds % 60).padStart(2, '0');
+      return `${h}:${m}:${s}`;
+    }
 
-      // Store the channel reference
-      callChannel = roomChannel;
-
+    async function startWebRtc(channel) {
       showScreen('screen-call');
-      log(`Using persistent channel: room_${roomId}…`);
 
-      // Local Media Capture initialization
+      // Fullscreen/Immersive setup
+      document.body.style.padding = '0';
+      const dev = document.querySelector('.device');
+      dev.style.maxWidth = '100vw'; dev.style.height = '100vh'; dev.style.borderRadius = '0';
+      document.querySelector('.topbar').style.display = 'none';
+      logEl.style.display = 'none';
+
+      const isVideo = currentCallType === 'VIDEO';
+      document.getElementById('videoLayout').style.display = isVideo ? 'flex' : 'none';
+      document.getElementById('audioOnlyUI').style.display = isVideo ? 'none' : 'flex';
+
       try {
-        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        document.getElementById('localVideo').srcObject = localStream;
-        log('Local camera array mounted.', 'ok');
-      } catch (e) {
-        log('Hardware permission error.', 'warn');
-        return;
-      }
-
-      // Initialize WebRTC Pipeline Architecture
-      peerConnection = new RTCPeerConnection(rtcConfig);
-      
-      // Add tracks to peer connection
-      localStream.getTracks().forEach(track => {
-        log(`Adding ${track.kind} track to peer connection`, 'ok');
-        peerConnection.addTrack(track, localStream);
-      });
-
-      const remoteStream = new MediaStream();
-      document.getElementById('remoteVideo').srcObject = remoteStream;
-
-      peerConnection.ontrack = (event) => {
-        log(`Remote ${event.track.kind} track received`, 'ok');
-        const remoteVideo = document.getElementById('remoteVideo');
-
-        // Fix: Safe track assignment. Some browsers don't provide event.streams[0] immediately.
-        if (event.streams && event.streams[0]) {
-          remoteVideo.srcObject = event.streams[0];
-          log(`Track added via stream[0]`, 'ok');
-        } else {
-          log(`Stream[0] not found, creating new MediaStream for track`, 'ok');
-          if (!remoteVideo.srcObject) {
-            remoteVideo.srcObject = new MediaStream();
-          }
-          remoteVideo.srcObject.addTrack(event.track);
-        }
-      };
-
-      // Pending ICE candidates queue for web
-      let webPendingCandidates = [];
-      let webRemoteDescSet = false;
-
-      // Local ICE Candidate Dispatch - Batch candidates to avoid rate limits
-      let pendingCandidates = [];
-      let candidateBatchTimeout = null;
-
-      peerConnection.onicecandidate = (event) => {
-        if (event.candidate && isSessionAuthorized) {
-          pendingCandidates.push({
-            sdpMid: event.candidate.sdpMid,
-            sdpMLineIndex: event.candidate.sdpMLineIndex,
-            candidate: event.candidate.candidate
-          });
-          
-          log(`ICE candidate queued (${pendingCandidates.length} pending)`, 'ok');
-          
-          if (candidateBatchTimeout) {
-            clearTimeout(candidateBatchTimeout);
-          }
-          
-          candidateBatchTimeout = setTimeout(() => {
-            if (pendingCandidates.length > 0) {
-              const candidatesToSend = [...pendingCandidates];
-              pendingCandidates = [];
-              
-              callChannel.send({
-                type: 'broadcast',
-                event: 'candidates-batch',
-                payload: {
-                  sender: 'web',
-                  candidates: candidatesToSend
-                }
-              });
-              
-              log(`Sent ${candidatesToSend.length} ICE candidates via Realtime`, 'ok');
-            }
-          }, 100);
-        }
-      };
-
-      // Handle connection state changes for timeout
-      peerConnection.onconnectionstatechange = () => {
-        log(`Connection state: ${peerConnection.connectionState}`, 'ok');
-        if (peerConnection.connectionState === 'connected') {
-          if (connectTimeoutHandle) {
-            clearTimeout(connectTimeoutHandle);
-            connectTimeoutHandle = null;
-          }
-        } else if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'disconnected') {
-          if (connectTimeoutHandle) {
-            clearTimeout(connectTimeoutHandle);
-            connectTimeoutHandle = null;
-          }
-          log('Connection failed or disconnected', 'warn');
-          showScreen('screen-error');
-          document.querySelector('#screen-error h1').textContent = 'Connection Failed';
-          document.querySelector('#screen-error p').textContent = 'Could not establish connection with the kiosk. Please check your network and try again.';
-          const retryBtn = document.createElement('button');
-          retryBtn.className = 'btn';
-          retryBtn.textContent = 'Retry';
-          retryBtn.style.marginTop = '16px';
-          retryBtn.onclick = () => location.reload();
-          document.querySelector('#screen-error').appendChild(retryBtn);
-        }
-      };
-
-      // Process inbound signals
-      callChannel
-        .on('broadcast', { event: 'offer' }, async ({ payload }) => {
-          if (payload.sender === 'android' && !peerConnection.currentRemoteDescription && isSessionAuthorized) {
-            log('Android offer matrix captured. Executing handshake layers…');
-
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.offer));
-            webRemoteDescSet = true;
-            
-            if (webPendingCandidates.length > 0) {
-              log(`Processing ${webPendingCandidates.length} pending candidates`, 'ok');
-              for (const data of webPendingCandidates) {
-                const iceData = {
-                  candidate: data.candidate || data.sdp,
-                  sdpMid: data.sdpMid,
-                  sdpMLineIndex: data.sdpMLineIndex
-                };
-                if (iceData.candidate) {
-                  await peerConnection.addIceCandidate(new RTCIceCandidate(iceData));
-                }
-              }
-              webPendingCandidates = [];
-            }
-            
-            const answer = await peerConnection.createAnswer();
-            await peerConnection.setLocalDescription(answer);
-
-            callChannel.send({
-              type: 'broadcast',
-              event: 'answer',
-              payload: {
-                sender: 'web',
-                answer: { type: answer.type, sdp: answer.sdp }
-              }
-            });
-            log('Answer session matrix returned to cell host.', 'ok');
-          }
-        })
-        .on('broadcast', { event: 'candidates-batch' }, async ({ payload }) => {
-          if (payload.sender === 'android' && isSessionAuthorized) {
-            try {
-              const candidates = payload.candidates || [];
-              log(`Received ${candidates.length} candidates from Android`, 'ok');
-              
-              const processCandidate = async (data) => {
-                // Robust mapping: standard is 'candidate', but we check 'sdp' for legacy support
-                const iceData = {
-                  candidate: data.candidate || data.sdp,
-                  sdpMid: data.sdpMid,
-                  sdpMLineIndex: data.sdpMLineIndex
-                };
-                if (iceData.candidate) {
-                  await peerConnection.addIceCandidate(new RTCIceCandidate(iceData));
-                }
-              };
-
-              if (webRemoteDescSet) {
-                for (const candidateData of candidates) {
-                  await processCandidate(candidateData);
-                }
-              } else {
-                webPendingCandidates = webPendingCandidates.concat(candidates);
-                log(`Queued ${candidates.length} candidates (waiting for offer)`, 'ok');
-              }
-            } catch (e) {
-              console.error("Signal insertion failure", e);
-            }
-          }
-        })
-        .on('broadcast', { event: 'hangup' }, async ({ payload }) => {
-          if (payload.sender === 'android') {
-            log('Android ended the call.', 'warn');
-            clearInterval(timerHandle);
-            if (localStream) localStream.getTracks().forEach(t => t.stop());
-            if (peerConnection) peerConnection.close();
-            if (callChannel) {
-              supabaseClient.removeChannel(callChannel);
-            }
-            document.querySelector('.call-meta').innerHTML = '<div class="timer">Call ended</div>';
-          }
-        })
-        .subscribe((status) => {
-          if (status === 'SUBSCRIBED' && isSessionAuthorized) {
-            log('Security channel active. Requesting connection from node.', 'ok');
-            callChannel.send({
-              type: 'broadcast',
-              event: 'web-ready',
-              payload: { sender: 'web' }
-            });
-            
-            // Start connect timeout - if not connected within 25s, show error
-            connectTimeoutHandle = setTimeout(() => {
-              if (peerConnection && peerConnection.connectionState !== 'connected') {
-                log('Connect timeout reached (25s)', 'warn');
-                showScreen('screen-error');
-                document.querySelector('#screen-error h1').textContent = 'Connection Timeout';
-                document.querySelector('#screen-error p').textContent = 'Could not connect to the kiosk within 25 seconds. Please check your network and try again.';
-                const retryBtn = document.createElement('button');
-                retryBtn.className = 'btn';
-                retryBtn.textContent = 'Retry';
-                retryBtn.style.marginTop = '16px';
-                retryBtn.onclick = () => location.reload();
-                document.querySelector('#screen-error').appendChild(retryBtn);
-              }
-            }, 25000);
-          }
+        localStream = await navigator.mediaDevices.getUserMedia({
+          video: isVideo ? { facingMode: currentFacingMode } : false,
+          audio: true
         });
 
-      // Call timer initialization
-      timerHandle = setInterval(() => {
-        seconds++;
-        const m = String(Math.floor(seconds / 60)).padStart(2, '0');
-        const s = String(seconds % 60).padStart(2, '0');
-        document.getElementById('callTimer').textContent = `${m}:${s}`;
-      }, 1000);
+        if (isVideo) {
+            document.getElementById('localVideo').srcObject = localStream;
+            setupDrag(document.getElementById('localVideo'));
+        }
+
+        peerConnection = new RTCPeerConnection(rtcConfig);
+        localStream.getTracks().forEach(t => peerConnection.addTrack(t, localStream));
+
+        peerConnection.ontrack = (e) => {
+          document.getElementById('remoteVideo').srcObject = e.streams[0];
+        };
+
+        peerConnection.onicecandidate = (e) => {
+          if (e.candidate) {
+            channel.send({
+              type: 'broadcast',
+              event: 'candidates-batch',
+              payload: { sender: 'web', candidates: [{
+                candidate: e.candidate.candidate,
+                sdpMid: e.candidate.sdpMid,
+                sdpMLineIndex: e.candidate.sdpMLineIndex
+              }]}
+            });
+          }
+        };
+
+        // Signaling Handlers
+        channel
+          .on('broadcast', { event: 'offer' }, async ({ payload }) => {
+            if (payload.sender === 'android') {
+              await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.offer));
+              const answer = await peerConnection.createAnswer();
+              await peerConnection.setLocalDescription(answer);
+              channel.send({ type: 'broadcast', event: 'answer', payload: { sender: 'web', answer } });
+            }
+          })
+          .on('broadcast', { event: 'candidates-batch' }, async ({ payload }) => {
+            if (payload.sender === 'android') {
+              payload.candidates.forEach(c => peerConnection.addIceCandidate(new RTCIceCandidate(c)));
+            }
+          })
+          .on('broadcast', { event: 'hangup' }, () => terminateCall())
+          .subscribe((status) => {
+             if (status === 'SUBSCRIBED') {
+                channel.send({ type: 'broadcast', event: 'web-ready', payload: { sender: 'web' } });
+             }
+          });
+
+        // Timer Start
+        callTimer = setInterval(() => {
+          seconds++;
+          inmateBalance = Math.max(0, inmateBalance - 1);
+          const timeStr = formatTime(seconds);
+          const balStr = `Bal: ${formatTime(inmateBalance)}`;
+
+          document.getElementById('videoTimer').textContent = timeStr;
+          document.getElementById('audioTimer').textContent = timeStr;
+          document.getElementById('videoBalance').textContent = balStr;
+
+          if (inmateBalance <= 0) terminateCall();
+        }, 1000);
+
+      } catch (err) {
+        log('Media Error: ' + err.message, 'warn');
+      }
     }
 
     /* ======================================================================
-        5. CALL TEARDOWN MANAGEMENT
+        4. CONTROLS LOGIC
        ====================================================================== */
-    document.getElementById('hangupBtn').addEventListener('click', async () => {
-      clearInterval(timerHandle);
-      isSessionAuthorized = false;
-      isCallActive = false;
+    const hangup = () => {
+        terminateCall();
+        supabaseClient.channel(`room_${roomId}`).send({ type: 'broadcast', event: 'hangup', payload: { sender: 'web' } });
+        supabaseClient.from('call_rooms').delete().eq('room_id', roomId).then(() => {
+            window.location.href = 'about:blank';
+        });
+    };
 
+    function terminateCall() {
+      clearInterval(callTimer);
       if (localStream) localStream.getTracks().forEach(t => t.stop());
       if (peerConnection) peerConnection.close();
+      document.querySelector('.video-header .timer').textContent = 'Call Ended';
+      document.getElementById('audioTimer').textContent = 'Call Ended';
+      setTimeout(() => window.location.reload(), 3000);
+    }
 
-      if (callChannel) {
-        callChannel.send({
-          type: 'broadcast',
-          event: 'hangup',
-          payload: { sender: 'web' }
-        });
-        supabaseClient.removeChannel(callChannel);
-      }
+    // Video Controls
+    document.getElementById('videoHangupBtn').onclick = hangup;
+    document.getElementById('videoMicBtn').onclick = function() {
+        isMicMuted = !isMicMuted;
+        localStream.getAudioTracks()[0].enabled = !isMicMuted;
+        this.classList.toggle('active', isMicMuted);
+        this.innerHTML = isMicMuted ?
+            `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17c0-.06.02-.11.02-.17V5c0-1.66-1.34-3-3-3S9 3.34 9 5v.18l5.98 5.99zM4.27 3L3 4.27l6.01 6.01V11c0 1.66 1.33 3 2.99 3 .22 0 .44-.03.65-.08l1.1 1.1c-.54.35-1.14.62-1.75.73V21h-2v-3.08c-3.39-.49-6-3.39-6-6.92h1.7c0 2.85 2.06 5.28 4.8 5.86l1.54 1.54c-1.31.26-2.61.32-3.79.32z"/></svg>` :
+            `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 14 3 14zM17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>`;
+    };
+    document.getElementById('videoSwitchBtn').onclick = async function() {
+        currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+        const videoTrack = localStream.getVideoTracks()[0];
+        if (videoTrack) {
+            localStream.removeTrack(videoTrack);
+            videoTrack.stop();
+            const newStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: currentFacingMode } });
+            const newTrack = newStream.getVideoTracks()[0];
+            localStream.addTrack(newTrack);
+            document.getElementById('localVideo').srcObject = localStream;
+            // Replace track in peer connection
+            const sender = peerConnection.getSenders().find(s => s.track.kind === 'video');
+            if (sender) sender.replaceTrack(newTrack);
+        }
+    };
 
-      // Delete room from database
-      try {
-        await supabaseClient
-          .from('call_rooms')
-          .delete()
-          .eq('room_id', roomId);
-        log('Room deleted from database.', 'ok');
-      } catch(e) {
-        log('Failed to delete room: ' + e.message, 'warn');
-      }
+    // Audio Controls
+    document.getElementById('audioHangupBtn').onclick = hangup;
+    document.getElementById('audioMicBtn').onclick = () => document.getElementById('videoMicBtn').click();
+    document.getElementById('audioSpeakerBtn').onclick = function() {
+        this.classList.toggle('active');
+        // Web audio speaker toggle usually handled by output device selection if available
+    };
+    document.getElementById('audioInfoBtn').onclick = () => {
+        document.getElementById('infoDialog').style.display = 'flex';
+    };
 
-      log('Media pipeline completely unmounted.', 'warn');
-      document.querySelector('.call-meta').innerHTML = '<div class="timer">Call ended</div>';
-    });
+    // Drag Logic for Local Video
+    function setupDrag(el) {
+        let x = 0, y = 0, initialX, initialY;
+        el.onmousedown = dragMouseDown;
+        el.ontouchstart = dragMouseDown;
+
+        function dragMouseDown(e) {
+            e = e || window.event;
+            e.preventDefault();
+            initialX = (e.type === 'touchstart') ? e.touches[0].clientX : e.clientX;
+            initialY = (e.type === 'touchstart') ? e.touches[0].clientY : e.clientY;
+            document.onmouseup = closeDragElement;
+            document.ontouchend = closeDragElement;
+            document.onmousemove = elementDrag;
+            document.ontouchmove = elementDrag;
+        }
+
+        function elementDrag(e) {
+            e = e || window.event;
+            const curX = (e.type === 'touchmove') ? e.touches[0].clientX : e.clientX;
+            const curY = (e.type === 'touchmove') ? e.touches[0].clientY : e.clientY;
+            x = initialX - curX;
+            y = initialY - curY;
+            initialX = curX;
+            initialY = curY;
+            el.style.top = (el.offsetTop - y) + "px";
+            el.style.left = (el.offsetLeft - x) + "px";
+            el.style.right = 'auto'; // Reset right during drag
+        }
+
+        function closeDragElement() {
+            document.onmouseup = null;
+            document.onmousemove = null;
+            document.ontouchend = null;
+            document.ontouchmove = null;
+        }
+    }
+
+    // Toggle overlays on click
+    document.getElementById('screen-call').onclick = (e) => {
+        if (currentCallType !== 'VIDEO') return;
+        if (e.target.closest('.ctrl-btn')) return;
+        const header = document.getElementById('videoHeader');
+        const footer = document.getElementById('videoFooter');
+        const visible = header.style.opacity !== '0';
+        header.style.opacity = visible ? '0' : '1';
+        footer.style.opacity = visible ? '0' : '1';
+    };
+
 </script>
 
 </body>

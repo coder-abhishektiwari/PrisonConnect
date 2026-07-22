@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk-auto"
+    xmlns:app2="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -60,7 +61,7 @@
         android:id="@+id/video_call_ui"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:visibility="gone">
+        android:visibility="invisible">
 
         <org.webrtc.SurfaceViewRenderer
             android:id="@+id/remote_view"
@@ -78,6 +79,8 @@
             android:layout_height="160dp"
             android:layout_margin="16dp"
             android:background="@android:color/black"
+            app2:layout_constraintEnd_toEndOf="parent"
+            app2:layout_constraintTop_toBottomOf="@+id/video_header"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toEndOf="parent" />
 
@@ -86,11 +89,12 @@
             android:id="@+id/video_header"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_margin="16dp"
             android:background="@drawable/bg_timer_overlay"
             android:gravity="center"
             android:orientation="vertical"
             android:padding="12dp"
+            app2:layout_constraintEnd_toEndOf="parent"
+            app2:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent"
@@ -125,24 +129,27 @@
         <!-- Footer -->
         <LinearLayout
             android:id="@+id/video_footer"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="48dp"
+            android:padding="20dp"
             android:background="@drawable/bg_timer_overlay"
             android:gravity="center"
             android:orientation="horizontal"
-            android:padding="8dp"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toStartOf="parent">
+            app2:layout_constraintBottom_toBottomOf="parent"
+            app2:layout_constraintEnd_toEndOf="parent"
+            app2:layout_constraintStart_toStartOf="parent">
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_video_mic"
                 style="@style/Widget.Material3.Button.IconButton"
                 android:layout_width="56dp"
                 android:layout_height="56dp"
-                app:icon="@drawable/ic_mic"
-                app:iconTint="@android:color/white" />
+                app2:icon="@drawable/ic_mic"
+                android:background="@drawable/bg_control_button"
+                app2:backgroundTint="@null"
+                app2:iconTint="@android:color/white"
+                app2:iconGravity="textStart"
+                app2:iconPadding="0dp"/>
 
             <com.google.android.material.floatingactionbutton.FloatingActionButton
                 android:id="@+id/btn_video_hangup"
@@ -150,18 +157,22 @@
                 android:layout_height="wrap_content"
                 android:layout_marginHorizontal="24dp"
                 android:src="@drawable/ic_call_end_down"
-                app:backgroundTint="?attr/colorError"
-                app:elevation="0dp"
-                app:fabSize="normal"
-                app:tint="@android:color/white" />
+                app2:backgroundTint="?attr/colorError"
+                app2:elevation="0dp"
+                app2:fabSize="normal"
+                app2:tint="@android:color/white"/>
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_video_switch"
                 style="@style/Widget.Material3.Button.IconButton"
                 android:layout_width="56dp"
                 android:layout_height="56dp"
-                app:icon="@drawable/ic_camera_switch"
-                app:iconTint="@android:color/white" />
+                app2:icon="@drawable/ic_camera_switch"
+                android:background="@drawable/bg_control_button"
+                app2:backgroundTint="@null"
+                app2:iconTint="@android:color/white"
+                app2:iconGravity="textStart"
+                app2:iconPadding="0dp"/>
         </LinearLayout>
 
     </androidx.constraintlayout.widget.ConstraintLayout>

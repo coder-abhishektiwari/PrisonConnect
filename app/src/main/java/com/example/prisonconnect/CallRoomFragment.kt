@@ -1,38 +1,53 @@
 package com.example.prisonconnect
 
-import android.Manifest
 import android.annotation.SuppressLint
 import android.content.*
-import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.IBinder
 import android.util.Log
 import android.view.*
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.example.prisonconnect.databinding.FragmentCallRoomBinding
+import com.example.prisonconnect.databinding.DialogCallSummaryBinding
 import com.example.prisonconnect.model.CallRoom
+import com.example.prisonconnect.model.User
 import com.example.prisonconnect.repository.DbService
+import com.example.prisonconnect.webrtc.CallDiagnosticHelper
 import com.example.prisonconnect.webrtc.SignalingClient
 import com.example.prisonconnect.webrtc.SmsController
 import com.example.prisonconnect.webrtc.WebRtcManager
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.*
 import org.webrtc.*
 import java.util.*
+import java.util.concurrent.atomic.AtomicBoolean
 
-import com.example.prisonconnect.model.User
-import com.example.prisonconnect.databinding.DialogCallSummaryBinding
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.snackbar.Snackbar
-
-class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClient.SignalingListener {
+/**
+ * Fragment for handling both audio and video calls from the kiosk.
+ *
+ * Manages the complete call lifecycle including:
+ * - Room initialization and status polling
+ * - Pre-call diagnostics
+ * - WebRTC peer connection setup
+ * - Signaling via Supabase Realtime
+ * - SMS link delivery with OTP
+ * - Call timer and balance tracking
+ * - Recording service integration
+ * - UI for both audio and video call modes
+ * - Local video overlay with drag for video calls
+ */
+class CallRoomFragment : Fragment(),
+    WebRtcManager.WebRtcListener,
+    SignalingClient.SignalingListener {
 
     private var _binding: FragmentCallRoomBinding? = null
     private val binding get() = _binding!!
+
+    private val logger = Logger("CallRoom")
 
     private var roomId: String? = null
     private var contactPhone: String = ""
@@ -46,7 +61,7 @@ class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClie
 
     private lateinit var smsController: SmsController
     private lateinit var webRtcManager: WebRtcManager
-    private lateinit var diagnosticHelper: com.example.prisonconnect.webrtc.CallDiagnosticHelper
+    private lateinit var diagnosticHelper: CallDiagnosticHelper
     private var signalingClient: SignalingClient? = null
 
     private var recordingService: SecureHardwareRecordingService? = null
@@ -54,16 +69,17 @@ class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClie
     private var roomPollJob: Job? = null
     private var smsJob: Job? = null
     private var timerJob: Job? = null
-    private var isCallStarted = false
+    private var isCallStarted = AtomicBoolean(false)
     private var isOtpSent = false
     private var isLinkSent = false
+    private var isOfferSent = AtomicBoolean(false)
     private var currentRoomState = RoomState.UNKNOWN
     private var isRemoteDescriptionSet = false
     private val localCandidatesQueue = mutableListOf<IceCandidate>()
     private val remoteCandidatesQueue = mutableListOf<IceCandidate>()
     private var candidateBatchJob: Job? = null
     private var remoteVideoTrack: VideoTrack? = null
-    
+
     // Call Timer & Balance
     private var elapsedSeconds = 0L
     private var remainingBalanceSeconds = 0L
@@ -82,8 +98,27 @@ class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClie
 
     private val eglBase = EglBase.create()
 
+    /** Custom Logger class to avoid confusion with android.util.Log */
+    private class Logger(private val tag: String) {
+        fun d(message: String) = Log.d(tag, message)
+        fun w(message: String) = Log.w(tag, message)
+        fun e(message: String, throwable: Throwable? = null) {
+            if (throwable != null) Log.e(tag, message, throwable) else Log.e(tag, message)
+        }
+    }
+
     private enum class RoomState {
         WAITING, OTP_SENT, ACTIVE, CONNECTED, DISCONNECTED, TAMPER_KILLED, UNKNOWN
+    }
+
+    companion object {
+        private const val TAG = "CallRoom"
+        private const val ROOM_POLL_INTERVAL_MS = 3000L
+        private const val CANDIDATE_BATCH_DELAY_MS = 300L
+        private const val CONNECT_TIMEOUT_MS = 25000L
+        private const val OVERLAY_HIDE_DELAY_MS = 3000L
+        private const val FALLBACK_OFFER_DELAY_MS = 1500L
+        private const val BALANCE_SYNC_INTERVAL_SECONDS = 10
     }
 
     private val serviceConnection = object : ServiceConnection {
@@ -92,6 +127,7 @@ class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClie
             recordingService = binder.getService()
             isServiceBound = true
         }
+
         override fun onServiceDisconnected(name: ComponentName?) {
             isServiceBound = false
         }
@@ -100,43 +136,51 @@ class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClie
     private val diagnosticLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
-        val allGranted = results.values.all { it }
-        if (allGranted) {
+        if (results.values.all { it }) {
             runPreCallDiagnostic()
         } else {
             showLobby(binding, "❌ Permissions denied. Cannot proceed with the call.")
         }
     }
 
-    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View {
         _binding = FragmentCallRoomBinding.inflate(inflater, container, false)
         return binding.root
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        
-        val binding = _binding ?: return
-        
+
+        val safeBinding = _binding ?: return
+
         smsController = SmsController()
         webRtcManager = WebRtcManager(requireContext(), eglBase, this)
-        diagnosticHelper = com.example.prisonconnect.webrtc.CallDiagnosticHelper(this)
-        
+        diagnosticHelper = CallDiagnosticHelper(requireContext())
+
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.Default) {
             webRtcManager.initialize()
-            Log.d("CallRoom abhishek", "WebRtcManager initialized in background")
+            logger.d("WebRtcManager initialized in background")
         }
 
         callType = arguments?.getString("call_type") ?: "VIDEO"
         inmateId = arguments?.getString("user_id") ?: "INMATE_001"
-        inmateName = arguments?.getString("inmate_name") ?: arguments?.getString("full_name") ?: "Inmate"
+        inmateName = arguments?.getString("inmate_name")
+            ?: arguments?.getString("full_name") ?: "Inmate"
         jailName = arguments?.getString("jail_name") ?: "jail"
-        roomId = arguments?.getString("room_id") ?: "ROOM_${System.currentTimeMillis()}"
+        roomId = arguments?.getString("room_id")
+            ?: "ROOM_${System.currentTimeMillis()}"
         contactPhone = arguments?.getString("phone_number") ?: ""
 
-        Log.d("CallRoom abhishek", "onViewCreated - roomId: $roomId, contactPhone: $contactPhone, inmateName: $inmateName")
+        logger.d(
+            "onViewCreated - roomId: $roomId, contactPhone: $contactPhone, " +
+                    "inmateName: $inmateName"
+        )
 
-        initializeLobbyUi(binding)
+        initializeLobbyUi(safeBinding)
         setupBackPressHandler()
         setupVideoDrag()
         setupOverlayLogic()
@@ -148,29 +192,38 @@ class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClie
             remainingBalanceSeconds = initialBalanceSeconds
 
             initializeRoom(inmateId, callType)
-            
+
+            // Retry finding room in database (up to 5 seconds)
             var room: CallRoom? = null
             for (i in 1..5) {
                 delay(1000)
                 if (_binding == null) return@launch
-                room = DbService.getDocumentByColumn<CallRoom>("call_rooms", "room_id", roomId.toString())
+                room = DbService.getDocumentByColumn<CallRoom>(
+                    "call_rooms",
+                    "room_id",
+                    roomId.toString()
+                )
                 if (room != null) {
-                    Log.d("CallRoom abhishek", "Room found after $i seconds")
+                    logger.d("Room found after $i seconds")
                     break
                 }
             }
-            
+
             if (_binding == null) return@launch
             if (room == null) {
-                showLobby(binding, "❌ Error: Room not created.")
+                showLobby(safeBinding, "❌ Error: Room not created.")
                 return@launch
             }
-            
-            signalingClient = SignalingClient(roomId!!, viewLifecycleOwner.lifecycleScope, this@CallRoomFragment)
+
+            signalingClient = SignalingClient(
+                roomId!!,
+                viewLifecycleOwner.lifecycleScope,
+                this@CallRoomFragment
+            )
             signalingClient?.connect()
-            
+
             runPreCallDiagnostic()
-            
+
             val receiverPhone = room.receiver_phone ?: room.receiverPhone
             if (!receiverPhone.isNullOrBlank()) {
                 startSmsLoop(receiverPhone)
@@ -180,21 +233,24 @@ class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClie
     }
 
     private fun setupBackPressHandler() {
-        requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() {
-                updateRoomStatus("DISCONNECTED")
-                teardownAndExit()
+        requireActivity().onBackPressedDispatcher.addCallback(
+            viewLifecycleOwner,
+            object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    updateRoomStatus("DISCONNECTED")
+                    teardownAndExit()
+                }
             }
-        })
+        )
     }
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupVideoDrag() {
-        val binding = _binding ?: return
+        val safeBinding = _binding ?: return
         var dX = 0f
         var dY = 0f
 
-        binding.localView.setOnTouchListener { view, event ->
+        safeBinding.localView.setOnTouchListener { view, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     dX = view.x - event.rawX
@@ -215,58 +271,66 @@ class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClie
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupOverlayLogic() {
-        val binding = _binding ?: return
-        binding.videoClickOverlay.setOnTouchListener { _, event ->
+        val safeBinding = _binding ?: return
+        safeBinding.videoClickOverlay.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
                 toggleOverlays()
             }
             true
         }
 
-        binding.btnVideoHangup.setOnClickListener {
+        safeBinding.btnVideoHangup.setOnClickListener {
             updateRoomStatus("DISCONNECTED")
             teardownAndExit()
         }
 
-        binding.btnVideoMic.setOnClickListener {
+        safeBinding.btnVideoMic.setOnClickListener {
             isMicEnabled = !isMicEnabled
             webRtcManager.setAudioEnabled(isMicEnabled)
-            binding.btnVideoMic.setIconResource(if (isMicEnabled) R.drawable.ic_mic else R.drawable.ic_mic_off)
-            binding.btnAudioMic.setIconResource(if (isMicEnabled) R.drawable.ic_mic else R.drawable.ic_mic_off)
+            val icon = if (isMicEnabled) R.drawable.ic_mic else R.drawable.ic_mic_off
+            safeBinding.btnVideoMic.setIconResource(icon)
+            safeBinding.btnAudioMic.setIconResource(icon)
+            safeBinding.btnVideoMic.alpha = if (isMicEnabled) 1.0f else 0.6f
+            safeBinding.btnAudioMic.alpha = if (isMicEnabled) 1.0f else 0.6f
         }
 
-        binding.btnVideoSwitch.setOnClickListener {
+        safeBinding.btnVideoSwitch.setOnClickListener {
             webRtcManager.switchCamera()
         }
     }
 
     private fun setupAudioControls() {
-        val binding = _binding ?: return
-        binding.btnAudioHangup.setOnClickListener {
+        val safeBinding = _binding ?: return
+        safeBinding.btnAudioHangup.setOnClickListener {
             updateRoomStatus("DISCONNECTED")
             teardownAndExit()
         }
 
-        binding.btnAudioMic.setOnClickListener {
+        safeBinding.btnAudioMic.setOnClickListener {
             isMicEnabled = !isMicEnabled
             webRtcManager.setAudioEnabled(isMicEnabled)
-            binding.btnAudioMic.setIconResource(if (isMicEnabled) R.drawable.ic_mic else R.drawable.ic_mic_off)
-            binding.btnVideoMic.setIconResource(if (isMicEnabled) R.drawable.ic_mic else R.drawable.ic_mic_off)
+            val icon = if (isMicEnabled) R.drawable.ic_mic else R.drawable.ic_mic_off
+            safeBinding.btnAudioMic.setIconResource(icon)
+            safeBinding.btnVideoMic.setIconResource(icon)
+            safeBinding.btnAudioMic.alpha = if (isMicEnabled) 1.0f else 0.6f
+            safeBinding.btnVideoMic.alpha = if (isMicEnabled) 1.0f else 0.6f
         }
 
-        binding.btnAudioSpeaker.setOnClickListener {
+        safeBinding.btnAudioSpeaker.setOnClickListener {
             isSpeakerEnabled = !isSpeakerEnabled
             webRtcManager.setSpeakerphoneOn(isSpeakerEnabled)
-            binding.btnAudioSpeaker.alpha = if (isSpeakerEnabled) 1.0f else 0.5f
+            safeBinding.btnAudioSpeaker.alpha = if (isSpeakerEnabled) 1.0f else 0.5f
         }
 
-        binding.btnAudioInfo.setOnClickListener {
+        safeBinding.btnAudioInfo.setOnClickListener {
             showCallInfoTooltip()
         }
     }
 
     private fun showCallInfoTooltip() {
-        val info = "Inmate: $inmateName\nNumber: $contactPhone\nDuration: ${formatSeconds(elapsedSeconds)}\nBalance: ${formatSeconds(remainingBalanceSeconds)}\nFacility: $jailName"
+        val info = "Inmate: $inmateName\nNumber: $contactPhone\n" +
+                "Duration: ${formatSeconds(elapsedSeconds)}\n" +
+                "Balance: ${formatSeconds(remainingBalanceSeconds)}\nFacility: $jailName"
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("Call Details")
             .setMessage(info)
@@ -279,52 +343,54 @@ class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClie
     }
 
     private fun showOverlays() {
-        val binding = _binding ?: return
+        val safeBinding = _binding ?: return
         overlaysVisible = true
-        binding.videoHeader.animate().alpha(1f).setDuration(300).start()
-        binding.videoFooter.animate().alpha(1f).setDuration(300).start()
+        safeBinding.videoHeader.animate().alpha(1f).setDuration(300).start()
+        safeBinding.videoFooter.animate().alpha(1f).setDuration(300).start()
         resetOverlayTimer()
     }
 
     private fun hideOverlays() {
-        val binding = _binding ?: return
+        val safeBinding = _binding ?: return
         overlaysVisible = false
-        binding.videoHeader.animate().alpha(0f).setDuration(300).start()
-        binding.videoFooter.animate().alpha(0f).setDuration(300).start()
+        safeBinding.videoHeader.animate().alpha(0f).setDuration(300).start()
+        safeBinding.videoFooter.animate().alpha(0f).setDuration(300).start()
     }
 
     private fun resetOverlayTimer() {
         hideOverlaysJob?.cancel()
         hideOverlaysJob = viewLifecycleOwner.lifecycleScope.launch {
-            delay(3000)
+            delay(OVERLAY_HIDE_DELAY_MS)
             hideOverlays()
         }
     }
 
     private fun runPreCallDiagnostic() {
-        val binding = _binding ?: return
-        val result = diagnosticHelper.performFullDiagnostic(isVideo = true)
+        val safeBinding = _binding ?: return
+        val isVideoCall = callType.equals("VIDEO", ignoreCase = true)
+        logger.d("runPreCallDiagnostic: isVideo=$isVideoCall")
+        val result = diagnosticHelper.performFullDiagnostic(isVideo = isVideoCall)
         val plan = diagnosticHelper.getResolutionPlan(result, diagnosticLauncher)
 
-        if (result == com.example.prisonconnect.webrtc.CallDiagnosticHelper.DiagnosticResult.Success) {
-            if (currentRoomState == RoomState.ACTIVE && !isCallStarted) {
+        if (result is CallDiagnosticHelper.DiagnosticResult.Success) {
+            if (currentRoomState == RoomState.ACTIVE && !isCallStarted.get()) {
                 activateCallSession()
             }
         } else {
-            showLobby(binding, "⚠️ ${plan.message}")
+            showLobby(safeBinding, "⚠️ ${plan.message}")
             if (plan.actionLabel != null && plan.action != null) {
-                binding.btnCancelCall.text = plan.actionLabel
-                binding.btnCancelCall.setOnClickListener { plan.action.invoke() }
+                safeBinding.btnCancelCall.text = plan.actionLabel
+                safeBinding.btnCancelCall.setOnClickListener { plan.action.invoke() }
             }
         }
     }
 
-    private fun initializeLobbyUi(binding: FragmentCallRoomBinding) {
-        binding.lobbyContainer.visibility = View.VISIBLE
-        binding.videoCallContainer.visibility = View.GONE
-        binding.audioCallContainer.visibility = View.GONE
-        binding.tvLobbyStatus.text = "Waiting for terminal response..."
-        binding.btnCancelCall.setOnClickListener {
+    private fun initializeLobbyUi(safeBinding: FragmentCallRoomBinding) {
+        safeBinding.lobbyContainer.visibility = View.VISIBLE
+        safeBinding.videoCallContainer.visibility = View.GONE
+        safeBinding.audioCallContainer.visibility = View.GONE
+        safeBinding.tvLobbyStatus.text = "Waiting for terminal response..."
+        safeBinding.btnCancelCall.setOnClickListener {
             updateRoomStatus("DISCONNECTED")
             teardownAndExit()
         }
@@ -344,10 +410,17 @@ class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClie
                 "receiver_phone" to contactPhone,
                 "otp" to roomOtp,
                 "token" to roomToken,
-                "webrtc_signaling" to mapOf("offer" to null, "answer" to null, "iceCandidates" to emptyList<Map<String, Any>>())
+                "webrtc_signaling" to mapOf(
+                    "offer" to null,
+                    "answer" to null,
+                    "iceCandidates" to emptyList<Map<String, Any>>()
+                )
             )
             DbService.insertRaw("call_rooms", roomData)
-        } catch (ex: Exception) { Log.e("CallRoom", "initRoom failed", ex) }
+            logger.d("Room initialized: $id")
+        } catch (ex: Exception) {
+            logger.e("initRoom failed", ex)
+        }
     }
 
     private fun observeRoomStatus() {
@@ -356,38 +429,68 @@ class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClie
                 while (isActive) {
                     if (_binding == null) break
                     try {
-                        val room: CallRoom? = DbService.getDocumentByColumn("call_rooms", "room_id", id)
+                        val room: CallRoom? = DbService.getDocumentByColumn(
+                            "call_rooms",
+                            "room_id",
+                            id
+                        )
                         val stateValue = room?.room_status?.uppercase() ?: "UNKNOWN"
                         val receiverPhone = room?.receiver_phone ?: room?.receiverPhone
-                        val binding = _binding ?: break
+                        val safeBinding = _binding ?: break
+
+                        logger.d(
+                            "Poll: status=$stateValue, " +
+                                    "isCallStarted=${isCallStarted.get()}"
+                        )
 
                         when (stateValue) {
                             "WAITING" -> {
-                                currentRoomState = RoomState.WAITING
-                                showLobby(binding, "📱 Call link sent!")
-                                if (!receiverPhone.isNullOrBlank() && smsJob?.isActive != true) startSmsLoop(receiverPhone)
+                                if (!isCallStarted.get()) {
+                                    currentRoomState = RoomState.WAITING
+                                    showLobby(safeBinding, "📱 Call link sent!")
+                                    if (!receiverPhone.isNullOrBlank() &&
+                                        smsJob?.isActive != true
+                                    ) {
+                                        startSmsLoop(receiverPhone)
+                                    }
+                                }
                             }
                             "OTP_SENT" -> {
-                                currentRoomState = RoomState.OTP_SENT
-                                showLobby(binding, "✅ Link opened! Sending code...")
-                                if (!receiverPhone.isNullOrBlank()) sendOtpSms(receiverPhone)
+                                if (!isCallStarted.get()) {
+                                    currentRoomState = RoomState.OTP_SENT
+                                    showLobby(safeBinding, "✅ Link opened! Sending code...")
+                                    if (!receiverPhone.isNullOrBlank()) {
+                                        sendOtpSms(receiverPhone)
+                                    }
+                                }
                             }
                             "ACTIVE" -> {
-                                currentRoomState = RoomState.ACTIVE
-                                showLobby(binding, "🔐 Access verified! Connecting...")
-                                runPreCallDiagnostic()
+                                if (!isCallStarted.get()) {
+                                    currentRoomState = RoomState.ACTIVE
+                                    showLobby(safeBinding, "🔐 Access verified! Connecting...")
+                                    runPreCallDiagnostic()
+                                }
                             }
                             "CONNECTED" -> {
                                 if (currentRoomState != RoomState.CONNECTED) {
                                     currentRoomState = RoomState.CONNECTED
-                                    showCallUi(binding)
+                                    showCallUi(safeBinding)
                                     startCallTimer()
                                 }
                             }
-                            "DISCONNECTED", "TAMPER_KILLED" -> teardownAndExit()
+                            "DISCONNECTED" -> {
+                                currentRoomState = RoomState.DISCONNECTED
+                                teardownAndExit()
+                            }
+                            "TAMPER_KILLED" -> {
+                                currentRoomState = RoomState.TAMPER_KILLED
+                                teardownAndExit()
+                            }
                         }
-                    } catch (e: Exception) { Log.e("CallRoom", "Poll failed", e) }
-                    delay(3000)
+                    } catch (e: Exception) {
+                        logger.e("Poll failed", e)
+                    }
+                    delay(ROOM_POLL_INTERVAL_MS)
                 }
             }
         }
@@ -396,15 +499,35 @@ class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClie
     private fun startCallTimer() {
         if (timerJob?.isActive == true) return
         timerJob = viewLifecycleOwner.lifecycleScope.launch {
+            var syncCounter = 0
             while (isActive && currentRoomState == RoomState.CONNECTED) {
                 delay(1000)
-                val binding = _binding ?: break
+                val safeBinding = _binding ?: break
                 elapsedSeconds++
                 remainingBalanceSeconds--
+                syncCounter++
+
                 val timeStr = formatSeconds(elapsedSeconds)
-                binding.tvVideoDuration.text = timeStr
-                binding.tvVideoBalance.text = "Bal: ${formatSeconds(remainingBalanceSeconds)}"
-                binding.tvAudioDuration.text = timeStr
+                safeBinding.tvVideoDuration.text = timeStr
+                safeBinding.tvVideoBalance.text = "Bal: ${formatSeconds(remainingBalanceSeconds)}"
+                safeBinding.tvAudioDuration.text = timeStr
+
+                // Sync balance to Supabase every 10 seconds
+                if (syncCounter >= BALANCE_SYNC_INTERVAL_SECONDS) {
+                    syncCounter = 0
+                    val currentUserId = inmateId
+                    val currentBalance = remainingBalanceSeconds
+                    if (currentUserId.isNotBlank()) {
+                        launch(Dispatchers.IO) {
+                            try {
+                                DbService.updateUserBalance(currentUserId, currentBalance)
+                            } catch (e: Exception) {
+                                logger.e("Periodic balance sync failed", e)
+                            }
+                        }
+                    }
+                }
+
                 if (remainingBalanceSeconds <= 0) {
                     updateRoomStatus("DISCONNECTED")
                     teardownAndExit()
@@ -431,8 +554,10 @@ class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClie
         smsJob = viewLifecycleOwner.lifecycleScope.launch {
             if (!isLinkSent && phone.isNotBlank()) {
                 isLinkSent = true
-                val smsLink = "https://prisonconnect-call.rf.gd/index.html?room=$roomId&token=$roomToken"
-                val linkMessage = "PrisonConnect: You have a video call request from Inmate: $inmateName at $jailName. Join: $smsLink"
+                val smsLink = "https://prisonconnect-call.rf.gd/index.html" +
+                        "?room=$roomId&token=$roomToken"
+                val linkMessage = "PrisonConnect: You have a video call request from " +
+                        "Inmate: $inmateName at $jailName. Join: $smsLink"
                 val result = smsController.sendSmsViaSupabase(phone, linkMessage)
                 if (!result.isSuccess) isLinkSent = false
             }
@@ -450,47 +575,77 @@ class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClie
     }
 
     private fun activateCallSession() {
-        if (isCallStarted) return
-        isCallStarted = true
-        val binding = _binding ?: return
+        if (!isCallStarted.compareAndSet(false, true)) {
+            logger.d("activateCallSession: Already started, skipping")
+            return
+        }
+        val safeBinding = _binding ?: return
         try {
-            binding.localView.init(eglBase.eglBaseContext, null)
-            binding.localView.setMirror(true)
-            binding.remoteView.init(eglBase.eglBaseContext, null)
-            webRtcManager.setupPeerConnection()
-            webRtcManager.startLocalStream(binding.localView)
+            logger.d("Activating call session (Type: $callType)...")
+
+            val isVideo = callType.equals("VIDEO", ignoreCase = true)
+
+            if (isVideo) {
+                safeBinding.localView.visibility = View.VISIBLE
+                safeBinding.localView.init(eglBase.eglBaseContext, null)
+                safeBinding.localView.setMirror(true)
+                safeBinding.localView.setZOrderMediaOverlay(true)
+            } else {
+                safeBinding.localView.visibility = View.GONE
+            }
+
+            safeBinding.remoteView.init(eglBase.eglBaseContext, null)
+
+            webRtcManager.setupPeerConnection(isVideo = isVideo)
+            webRtcManager.startLocalStream(safeBinding.localView, isVideo = isVideo)
+
             if (pendingWebReady) {
                 onWebReady()
                 pendingWebReady = false
             }
+
+            // Fallback trigger to ensure Offer is sent if web client is slow
+            viewLifecycleOwner.lifecycleScope.launch {
+                delay(FALLBACK_OFFER_DELAY_MS)
+                if (_binding != null && currentRoomState != RoomState.CONNECTED) {
+                    logger.d("Fallback: Triggering onWebReady...")
+                    onWebReady()
+                }
+            }
+
             startRecordingService()
-            showCallUi(binding)
+            showCallUi(safeBinding)
             startConnectTimeout()
-        } catch (e: Exception) { isCallStarted = false }
+        } catch (e: Exception) {
+            logger.e("Failed to activate call session", e)
+            isCallStarted.set(false)
+        }
     }
 
     private fun startConnectTimeout() {
         connectTimeoutJob?.cancel()
         connectTimeoutJob = viewLifecycleOwner.lifecycleScope.launch {
-            delay(25000)
-            val binding = _binding ?: return@launch
-            if (currentRoomState != RoomState.CONNECTED && isCallStarted) {
-                showLobby(binding, "❌ Connection failed.")
+            delay(CONNECT_TIMEOUT_MS)
+            val safeBinding = _binding ?: return@launch
+            if (currentRoomState != RoomState.CONNECTED && isCallStarted.get()) {
+                showLobby(safeBinding, "❌ Connection failed.")
             }
         }
     }
 
+    // --- WebRtcListener Implementation ---
+
     override fun onRemoteVideoTrackReceived(videoTrack: VideoTrack) {
         remoteVideoTrack = videoTrack
-        val binding = _binding ?: return
-        videoTrack.addSink(binding.remoteView)
+        val safeBinding = _binding ?: return
+        videoTrack.addSink(safeBinding.remoteView)
     }
 
     override fun onIceCandidateGenerated(candidate: IceCandidate) {
         synchronized(localCandidatesQueue) { localCandidatesQueue.add(candidate) }
         if (candidateBatchJob?.isActive != true) {
             candidateBatchJob = viewLifecycleOwner.lifecycleScope.launch {
-                delay(300)
+                delay(CANDIDATE_BATCH_DELAY_MS)
                 val candidatesToSend = synchronized(localCandidatesQueue) {
                     val list = localCandidatesQueue.toList()
                     localCandidatesQueue.clear()
@@ -510,101 +665,172 @@ class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClie
         }
     }
 
-    override fun onIceConnected() { 
+    override fun onIceConnected() {
         connectTimeoutJob?.cancel()
-        updateRoomStatus("CONNECTED") 
-    }
-    
-    override fun onIceConnectionFailed() {
-        connectTimeoutJob?.cancel()
-        val binding = _binding ?: return
-        if (isCallStarted && currentRoomState != RoomState.CONNECTED) {
-            showLobby(binding, "❌ Connection failed.")
+        updateRoomStatus("CONNECTED")
+
+        // Immediate UI transition without waiting for DB poll
+        viewLifecycleOwner.lifecycleScope.launch {
+            val safeBinding = _binding ?: return@launch
+            if (currentRoomState != RoomState.CONNECTED) {
+                currentRoomState = RoomState.CONNECTED
+                showCallUi(safeBinding)
+                startCallTimer()
+            }
         }
     }
 
-    override fun onSiteOpened() { 
-        val binding = _binding ?: return
-        if (currentRoomState == RoomState.WAITING) showLobby(binding, "✅ Link opened!") 
+    override fun onIceConnectionFailed() {
+        connectTimeoutJob?.cancel()
+        val safeBinding = _binding ?: return
+        if (isCallStarted.get() && currentRoomState != RoomState.CONNECTED) {
+            showLobby(safeBinding, "❌ Connection failed.")
+        }
     }
-    override fun onOtpVerified() { 
-        val binding = _binding ?: return
-        if (currentRoomState == RoomState.OTP_SENT) showLobby(binding, "🔐 Access verified!") 
+
+    // --- SignalingListener Implementation ---
+
+    override fun onSiteOpened() {
+        val safeBinding = _binding ?: return
+        if (currentRoomState == RoomState.WAITING) {
+            showLobby(safeBinding, "✅ Link opened!")
+        }
     }
-    
+
+    override fun onOtpVerified() {
+        val safeBinding = _binding ?: return
+        if (currentRoomState == RoomState.OTP_SENT) {
+            showLobby(safeBinding, "🔐 Access verified!")
+            currentRoomState = RoomState.ACTIVE
+            activateCallSession()
+        }
+    }
+
     override fun onAnswerReceived(sdp: String, type: String) {
-        val sessionDescription = SessionDescription(SessionDescription.Type.fromCanonicalForm(type), sdp)
-        webRtcManager.peerConnection?.setRemoteDescription(object : SdpObserver {
-            override fun onSetSuccess() {
-                isRemoteDescriptionSet = true
-                synchronized(remoteCandidatesQueue) {
-                    remoteCandidatesQueue.forEach { webRtcManager.peerConnection?.addIceCandidate(it) }
-                    remoteCandidatesQueue.clear()
+        val sessionDescription = SessionDescription(
+            SessionDescription.Type.fromCanonicalForm(type),
+            sdp
+        )
+        webRtcManager.currentPeerConnection?.setRemoteDescription(
+            object : SdpObserver {
+                override fun onSetSuccess() {
+                    isRemoteDescriptionSet = true
+                    synchronized(remoteCandidatesQueue) {
+                        remoteCandidatesQueue.forEach {
+                            webRtcManager.currentPeerConnection?.addIceCandidate(it)
+                        }
+                        remoteCandidatesQueue.clear()
+                    }
                 }
-            }
-            override fun onCreateSuccess(p0: SessionDescription?) {}
-            override fun onCreateFailure(p0: String?) {}
-            override fun onSetFailure(p0: String?) {}
-        }, sessionDescription)
+
+                override fun onCreateSuccess(p0: SessionDescription?) {}
+                override fun onCreateFailure(p0: String?) {}
+                override fun onSetFailure(p0: String?) {}
+            },
+            sessionDescription
+        )
     }
 
     override fun onCandidateBatchReceived(candidates: List<JsonObject>) {
         candidates.forEach { candidateData ->
             val sdpMid = candidateData["sdpMid"]?.jsonPrimitive?.content
-            val sdpMLineIndex = candidateData["sdpMLineIndex"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-            val candidateSdp = candidateData["candidate"]?.jsonPrimitive?.content ?: candidateData["sdp"]?.jsonPrimitive?.content
+            val sdpMLineIndex =
+                candidateData["sdpMLineIndex"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+            val candidateSdp = candidateData["candidate"]?.jsonPrimitive?.content
+                ?: candidateData["sdp"]?.jsonPrimitive?.content
             if (candidateSdp != null) {
                 val candidate = IceCandidate(sdpMid, sdpMLineIndex, candidateSdp)
                 if (isRemoteDescriptionSet) {
-                    webRtcManager.peerConnection?.addIceCandidate(candidate)
+                    webRtcManager.currentPeerConnection?.addIceCandidate(candidate)
                 } else {
-                    synchronized(remoteCandidatesQueue) { remoteCandidatesQueue.add(candidate) }
+                    synchronized(remoteCandidatesQueue) {
+                        remoteCandidatesQueue.add(candidate)
+                    }
                 }
             }
         }
     }
 
     override fun onWebReady() {
-        val pc = webRtcManager.peerConnection
-        if (pc == null) { pendingWebReady = true; return }
-        if (pc.remoteDescription == null && pc.signalingState() == PeerConnection.SignalingState.STABLE) {
-            pc.createOffer(object : SdpObserver {
-                override fun onCreateSuccess(sdp: SessionDescription) {
-                    pc.setLocalDescription(object : SdpObserver {
-                        override fun onSetSuccess() { signalingClient?.sendOffer(sdp.description, sdp.type.canonicalForm()) }
-                        override fun onCreateSuccess(p0: SessionDescription?) {}
-                        override fun onCreateFailure(p0: String?) {}
-                        override fun onSetFailure(p0: String?) {}
-                    }, sdp)
+        logger.d("Web is ready, checking if offer needed...")
+        val pc = webRtcManager.currentPeerConnection
+        if (pc == null) {
+            logger.w("onWebReady: PC is null, queuing event")
+            pendingWebReady = true
+            return
+        }
+
+        if (isOfferSent.compareAndSet(false, true)) {
+            if (pc.remoteDescription == null &&
+                pc.signalingState() == PeerConnection.SignalingState.STABLE
+            ) {
+                logger.d("Creating Offer...")
+                val constraints = MediaConstraints().apply {
+                    mandatory.add(
+                        MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true")
+                    )
+                    val receiveVideo = if (callType.equals("VIDEO", ignoreCase = true)) {
+                        "true"
+                    } else {
+                        "false"
+                    }
+                    mandatory.add(
+                        MediaConstraints.KeyValuePair("OfferToReceiveVideo", receiveVideo)
+                    )
                 }
-                override fun onSetSuccess() {}
-                override fun onCreateFailure(p0: String?) {}
-                override fun onSetFailure(p0: String?) {}
-            }, MediaConstraints())
+
+                pc.createOffer(object : SdpObserver {
+                    override fun onCreateSuccess(sdp: SessionDescription) {
+                        pc.setLocalDescription(object : SdpObserver {
+                            override fun onSetSuccess() {
+                                signalingClient?.sendOffer(
+                                    sdp.description,
+                                    sdp.type.canonicalForm()
+                                )
+                            }
+
+                            override fun onCreateSuccess(p0: SessionDescription?) {}
+                            override fun onCreateFailure(p0: String?) {}
+                            override fun onSetFailure(p0: String?) {}
+                        }, sdp)
+                    }
+
+                    override fun onSetSuccess() {}
+                    override fun onCreateFailure(p0: String?) {}
+                    override fun onSetFailure(p0: String?) {}
+                }, constraints)
+            } else {
+                logger.d("onWebReady: PC state not suitable or remote desc already set")
+                isOfferSent.set(false) // Reset if we couldn't send
+            }
+        } else {
+            logger.d("onWebReady: Offer already sent or in progress")
         }
     }
 
-    override fun onHangupReceived() { teardownAndExit() }
-
-    private fun showLobby(binding: FragmentCallRoomBinding, message: String) {
-        binding.lobbyContainer.visibility = View.VISIBLE
-        binding.videoCallContainer.visibility = View.GONE
-        binding.audioCallContainer.visibility = View.GONE
-        binding.tvLobbyStatus.text = message
+    override fun onHangupReceived() {
+        teardownAndExit()
     }
 
-    private fun showCallUi(binding: FragmentCallRoomBinding) {
-        binding.lobbyContainer.visibility = View.GONE
-        if (callType == "VIDEO") {
-            binding.videoCallContainer.visibility = View.VISIBLE
-            binding.audioCallContainer.visibility = View.GONE
-            binding.tvVideoName.text = inmateName
+    private fun showLobby(safeBinding: FragmentCallRoomBinding, message: String) {
+        safeBinding.lobbyContainer.visibility = View.VISIBLE
+        safeBinding.videoCallContainer.visibility = View.GONE
+        safeBinding.audioCallContainer.visibility = View.GONE
+        safeBinding.tvLobbyStatus.text = message
+    }
+
+    private fun showCallUi(safeBinding: FragmentCallRoomBinding) {
+        safeBinding.lobbyContainer.visibility = View.GONE
+        if (callType.equals("VIDEO", ignoreCase = true)) {
+            safeBinding.videoCallContainer.visibility = View.VISIBLE
+            safeBinding.audioCallContainer.visibility = View.GONE
+            safeBinding.tvVideoName.text = inmateName
             webRtcManager.setSpeakerphoneOn(true)
         } else {
-            binding.videoCallContainer.visibility = View.GONE
-            binding.audioCallContainer.visibility = View.VISIBLE
-            binding.tvAudioName.text = inmateName
-            binding.tvAudioPhone.text = contactPhone
+            safeBinding.videoCallContainer.visibility = View.GONE
+            safeBinding.audioCallContainer.visibility = View.VISIBLE
+            safeBinding.tvAudioName.text = inmateName
+            safeBinding.tvAudioPhone.text = contactPhone
             webRtcManager.setSpeakerphoneOn(isSpeakerEnabled)
         }
     }
@@ -612,15 +838,27 @@ class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClie
     private fun updateRoomStatus(status: String) {
         roomId?.let { id ->
             lifecycleScope.launch {
-                try { DbService.updateFieldsByColumn("call_rooms", "room_id", id, mapOf("room_status" to status)) }
-                catch (ex: Exception) { Log.e("CallRoom", "status update failed", ex) }
+                try {
+                    DbService.updateFieldsByColumn(
+                        "call_rooms",
+                        "room_id",
+                        id,
+                        mapOf("room_status" to status)
+                    )
+                } catch (ex: Exception) {
+                    logger.e("status update failed", ex)
+                }
             }
         }
     }
 
     private fun startRecordingService() {
         val intent = Intent(requireContext(), SecureHardwareRecordingService::class.java).apply {
-            putExtra("ROOM_ID", roomId); putExtra("KIOSK_ID", kioskId); putExtra("SESSION_ID", sessionId)
+            putExtra("ROOM_ID", roomId)
+            putExtra("KIOSK_ID", kioskId)
+            putExtra("SESSION_ID", sessionId)
+            putExtra("INMATE_NAME", inmateName)
+            putExtra("RECEIVER_NAME", contactPhone)
         }
         requireContext().startForegroundService(intent)
         requireContext().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
@@ -628,54 +866,117 @@ class CallRoomFragment : Fragment(), WebRtcManager.WebRtcListener, SignalingClie
 
     private fun stopRecordingService() {
         if (isServiceBound) {
-            try { recordingService?.stopAndUpload(); requireContext().unbindService(serviceConnection) } catch (e: Exception) {}
+            try {
+                recordingService?.stopAndUpload()
+                requireContext().unbindService(serviceConnection)
+            } catch (e: Exception) {
+                logger.e("Error stopping recording service", e)
+            }
             isServiceBound = false
         }
-        try { requireContext().stopService(Intent(requireContext(), SecureHardwareRecordingService::class.java)) } catch (e: Exception) {}
+        try {
+            requireContext().stopService(
+                Intent(requireContext(), SecureHardwareRecordingService::class.java)
+            )
+        } catch (e: Exception) {
+            logger.e("Error stopping service intent", e)
+        }
     }
 
-    private fun stopSmsLoop() { smsJob?.cancel(); smsJob = null }
+    private fun stopSmsLoop() {
+        smsJob?.cancel()
+        smsJob = null
+    }
 
     private fun teardownAndExit() {
+        logger.d("teardownAndExit called. Saving balance for Inmate: $inmateId")
         releaseResources()
-        viewLifecycleOwner.lifecycleScope.launch {
+
+        val currentBalance = remainingBalanceSeconds
+        val uid = inmateId
+
+        // Use separate scope to ensure DB update completes even if Fragment is destroyed.
+        // Balance accuracy is critical in a prison communication system.
+        @OptIn(DelicateCoroutinesApi::class)
+        GlobalScope.launch(Dispatchers.IO + NonCancellable) {
             try {
-                val newBalance = remainingBalanceSeconds.coerceAtLeast(0)
-                DbService.updateFields("users", inmateId, mapOf("balance_remaining_seconds" to newBalance))
-            } catch (e: Exception) {}
-            delay(1000)
-            deleteRoom()
-            showSummaryDialog()
+                val newBalance = currentBalance.coerceAtLeast(0)
+                logger.d("PERSISTENT DB UPDATE: $newBalance seconds for UID: $uid")
+
+                DbService.updateFields(
+                    table = "users",
+                    id = uid,
+                    fields = mapOf("balance_remaining_seconds" to newBalance)
+                )
+                logger.d("✅ DB PERSIST SUCCESS")
+            } catch (e: Exception) {
+                logger.e("❌ DB PERSIST FAIL", e)
+            }
+
+            withContext(Dispatchers.Main) {
+                delay(800)
+                deleteRoom()
+                showSummaryDialog()
+            }
         }
     }
 
     private fun releaseResources() {
-        stopSmsLoop(); timerJob?.cancel(); connectTimeoutJob?.cancel(); candidateBatchJob?.cancel(); roomPollJob?.cancel()
-        stopRecordingService(); smsController.unregisterReceivers(); webRtcManager.cleanup()
+        stopSmsLoop()
+        timerJob?.cancel()
+        connectTimeoutJob?.cancel()
+        candidateBatchJob?.cancel()
+        roomPollJob?.cancel()
+        stopRecordingService()
+        smsController.unregisterReceivers()
+        webRtcManager.cleanup()
         signalingClient?.sendHangupAndDisconnect()
-        try { eglBase.release() } catch (e: Exception) {}
+        try {
+            eglBase.release()
+        } catch (e: Exception) {
+            logger.e("Error releasing EGL base", e)
+        }
     }
 
     private fun showSummaryDialog() {
-        if (_binding == null) { exitToDashboard(); return }
+        if (_binding == null) {
+            exitToDashboard()
+            return
+        }
         val dialog = MaterialAlertDialogBuilder(requireContext()).create()
         val dialogBinding = DialogCallSummaryBinding.inflate(layoutInflater)
-        dialog.setView(dialogBinding.root); dialog.setCancelable(false)
+        dialog.setView(dialogBinding.root)
+        dialog.setCancelable(false)
         dialogBinding.tvSummaryPhone.text = contactPhone
         dialogBinding.tvSummaryDuration.text = formatDuration(elapsedSeconds)
-        dialogBinding.tvSummaryBalance.text = formatDuration(remainingBalanceSeconds.coerceAtLeast(0))
-        dialogBinding.btnSummaryOk.setOnClickListener { dialog.dismiss(); exitToDashboard() }
+        dialogBinding.tvSummaryBalance.text =
+            formatDuration(remainingBalanceSeconds.coerceAtLeast(0))
+        dialogBinding.btnSummaryOk.setOnClickListener {
+            dialog.dismiss()
+            exitToDashboard()
+        }
         dialog.show()
     }
 
     private fun exitToDashboard() {
-        (requireActivity() as? KioskMainActivity)?.navigateToFragment(DashboardFragment().apply {
-            arguments = Bundle().apply { putString("user_id", inmateId) }
-        }, false)
+        (requireActivity() as? KioskMainActivity)?.navigateToFragment(
+            DashboardFragment().apply {
+                arguments = Bundle().apply { putString("user_id", inmateId) }
+            },
+            false
+        )
     }
 
     private fun deleteRoom() {
-        roomId?.let { id -> lifecycleScope.launch { try { DbService.deleteByColumn("call_rooms", "room_id", id) } catch (ex: Exception) {} } }
+        roomId?.let { id ->
+            lifecycleScope.launch {
+                try {
+                    DbService.deleteByColumn("call_rooms", "room_id", id)
+                } catch (ex: Exception) {
+                    logger.e("Room deletion failed", ex)
+                }
+            }
+        }
     }
 
     override fun onDestroyView() {

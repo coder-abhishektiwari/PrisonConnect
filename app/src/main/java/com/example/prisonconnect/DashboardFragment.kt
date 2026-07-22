@@ -1,6 +1,7 @@
 package com.example.prisonconnect
 
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
@@ -8,7 +9,10 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.viewModels
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.GridLayoutManager
 import com.example.prisonconnect.databinding.FragmentDashboardBinding
 import com.example.prisonconnect.model.Contact
@@ -28,11 +32,8 @@ class DashboardFragment : Fragment() {
     private var _binding: FragmentDashboardBinding? = null
     private val binding get() = _binding!!
 
+    private val viewModel: DashboardViewModel by viewModels()
     private var userId: String? = null
-    private var balancePollJob: Job? = null
-    private var inmateName: String = "Inmate"
-    private var jailName: String = "jail"
-
     private lateinit var contactAdapter: ContactAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,23 +54,99 @@ class DashboardFragment : Fragment() {
 
         setupRecyclerView()
         setupListeners()
-        fetchInmateData()
-        fetchContacts()
-        startBalancePolling()
+        observeViewModel()
 
-        val binding = _binding
-        if (binding != null) {
-            // Logout button - just shows PIN screen (kiosk is fixed to one prisoner)
-            binding.btnLogout.setOnClickListener {
-                balancePollJob?.cancel()
-                // Go to LoginFragment which will show PIN screen (not prisoner ID)
-                (activity as? KioskMainActivity)?.navigateToFragment(LoginFragment(), false)
-            }
+        userId?.let { viewModel.loadData(it) }
 
-            binding.fabDialer.setOnClickListener {
-                showDialerDialog()
+        binding.btnLogout.setOnClickListener {
+            (activity as? KioskMainActivity)?.navigateToFragment(LoginFragment(), false)
+        }
+
+        binding.fabDialer.setOnClickListener {
+            showDialerDialog()
+        }
+    }
+
+    private fun setupRecyclerView() {
+        contactAdapter = ContactAdapter(emptyList(),
+            onAudioCall = { contact -> launchCall(contact.phone_number, "AUDIO", contact.full_name) },
+            onVideoCall = { contact -> launchCall(contact.phone_number, "VIDEO", contact.full_name) }
+        )
+        binding.rvContacts.apply {
+            val columns = resources.getInteger(R.integer.contact_columns)
+            layoutManager = GridLayoutManager(context, columns)
+            adapter = contactAdapter
+        }
+    }
+
+    private fun observeViewModel() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch {
+                    viewModel.user.collect { user ->
+                        user?.let { updateBalanceUI(it) }
+                    }
+                }
+                launch {
+                    viewModel.contacts.collect { contacts ->
+                        updateContactsUI(contacts)
+                    }
+                }
+                launch {
+                    viewModel.isLoading.collect { isLoading ->
+                        binding.pbBalance.isIndeterminate = isLoading
+                    }
+                }
             }
         }
+    }
+
+    private fun updateContactsUI(contacts: List<Contact>) {
+        if (contacts.isEmpty()) {
+            binding.rvContacts.visibility = View.GONE
+            binding.tvEmptyState.visibility = View.VISIBLE
+            binding.tvEmptyState.text = "No contacts added for you"
+        } else {
+            binding.tvEmptyState.visibility = View.GONE
+            binding.rvContacts.visibility = View.VISIBLE
+            contactAdapter.updateContacts(contacts)
+        }
+    }
+
+    private fun updateBalanceUI(user: User) {
+        binding.tvInmateName.text = user.full_name
+        binding.tvBalanceValue.text = formatBalance(user.balance_remaining_seconds)
+
+        val maxSeconds = 36000L // 10 hours scale
+        binding.pbBalance.max = maxSeconds.toInt()
+        binding.pbBalance.progress = user.balance_remaining_seconds.toInt().coerceIn(0, maxSeconds.toInt())
+    }
+
+    private fun formatBalance(seconds: Long): String {
+        val h = seconds / 3600
+        val m = (seconds % 3600) / 60
+        val s = seconds % 60
+        return String.format("%02d:%02d:%02d Hours", h, m, s)
+    }
+
+    private fun launchCall(phone: String, type: String, contactName: String = "") {
+        val user = viewModel.user.value ?: return
+        val intent = if (type == "VIDEO") {
+            Intent(requireContext(), VideoCallActivity::class.java)
+        } else {
+            Intent(requireContext(), AudioCallActivity::class.java)
+        }
+
+        intent.apply {
+            putExtra("room_id", "ROOM_${System.currentTimeMillis()}")
+            putExtra("user_id", user.id)
+            putExtra("phone_number", phone)
+            putExtra("inmate_name", user.full_name)
+            putExtra("jail_name", user.jail_name)
+            putExtra("initial_balance", user.balance_remaining_seconds)
+            putExtra("contact_name", contactName)
+        }
+        startActivity(intent)
     }
 
     private fun showDialerDialog() {
@@ -77,7 +154,6 @@ class DashboardFragment : Fragment() {
         val dialogBinding = DialogDialerBinding.inflate(layoutInflater)
         dialog.setContentView(dialogBinding.root)
 
-        // Setup Country Code Picker
         val codes = listOf("+91", "+1", "+44", "+971", "+966")
         val adapter = ArrayAdapter(requireContext(), R.layout.dropdown_item, codes)
         dialogBinding.actCountryCode.setAdapter(adapter)
@@ -87,7 +163,7 @@ class DashboardFragment : Fragment() {
             val code = dialogBinding.actCountryCode.text.toString()
             if (validatePhone(phone)) {
                 dialog.dismiss()
-                navigateToManualCall("$code$phone", "AUDIO")
+                launchCall("$code$phone", "AUDIO")
             }
         }
 
@@ -96,10 +172,9 @@ class DashboardFragment : Fragment() {
             val code = dialogBinding.actCountryCode.text.toString()
             if (validatePhone(phone)) {
                 dialog.dismiss()
-                navigateToManualCall("$code$phone", "VIDEO")
+                launchCall("$code$phone", "VIDEO")
             }
         }
-
         dialog.show()
     }
 
@@ -110,160 +185,10 @@ class DashboardFragment : Fragment() {
         } else true
     }
 
-    private fun navigateToManualCall(fullPhone: String, type: String) {
-        val bundle = Bundle().apply {
-            putString("call_type", type)
-            putString("user_id", userId)
-            putString("phone_number", fullPhone)
-            putString("inmate_name", inmateName)
-            putString("jail_name", jailName)
-        }
-        val fragment = CallRoomFragment().apply {
-            arguments = bundle
-        }
-        (activity as? KioskMainActivity)?.navigateToFragment(fragment)
-    }
-
-    private fun setupRecyclerView() {
-        val binding = _binding ?: return
-        contactAdapter = ContactAdapter(emptyList(),
-            onAudioCall = { contact -> navigateToCall(contact, "AUDIO") },
-            onVideoCall = { contact -> navigateToCall(contact, "VIDEO") }
-        )
-        binding.rvContacts.apply {
-            val columns = resources.getInteger(R.integer.contact_columns)
-            layoutManager = GridLayoutManager(context, columns)
-            adapter = contactAdapter
-        }
-    }
-
-    private fun setupListeners() {
-        // No-op: polling replaces snapshot listener
-    }
-
-    private fun startBalancePolling() {
-        val id = userId ?: return
-        balancePollJob = viewLifecycleOwner.lifecycleScope.launch {
-            while (isActive) {
-                try {
-                    val user: User? = DbService.getDocument(table = "users", id = id)
-                    if (user != null && _binding != null) {
-                        updateBalanceUI(user)
-                    }
-                } catch (_: Exception) {
-                    // Silently retry on next poll
-                }
-                delay(3000L) // Poll every 3 seconds
-            }
-        }
-    }
-
-    private fun fetchInmateData() {
-        val binding = _binding ?: return
-        val currentBinding = binding
-        userId?.let { id ->
-            viewLifecycleOwner.lifecycleScope.launch {
-                try {
-                    val user: User? = DbService.getDocument(table = "users", id = id)
-                    if (_binding != null && user != null) {
-                        inmateName = user.full_name
-                        jailName = user.jail_name
-                        currentBinding.tvInmateName.text = user.full_name
-                    }
-                } catch (_: Exception) {
-                    if (_binding != null) {
-                        currentBinding.tvInmateName.text = "Inmate"
-                    }
-                }
-            }
-        }
-    }
-
-    private fun fetchContacts() {
-        val binding = _binding
-        if (binding == null) return
-        
-        userId?.let { id ->
-            viewLifecycleOwner.lifecycleScope.launch {
-                try {
-                    val contacts: List<Contact> = DbService.queryDocuments(
-                        table = "contacts",
-                        field = "associated_inmate_id",
-                        value = id
-                    )
-
-                    if (contacts.isEmpty()) {
-                        binding.rvContacts.visibility = View.GONE
-                        binding.tvEmptyState.visibility = View.VISIBLE
-                        binding.tvEmptyState.text = "No contacts added for you"
-                    } else {
-                        binding.tvEmptyState.visibility = View.GONE
-                        binding.rvContacts.visibility = View.VISIBLE
-                        contactAdapter.updateContacts(contacts)
-                    }
-                } catch (e: Exception) {
-                    if (_binding != null) {
-                        binding.rvContacts.visibility = View.GONE
-                        binding.tvEmptyState.visibility = View.VISIBLE
-                        binding.tvEmptyState.text = "Failed to load contacts. Please try again."
-                    }
-                }
-            }
-        } ?: run {
-            if (_binding != null) {
-                binding.rvContacts.visibility = View.GONE
-                binding.tvEmptyState.visibility = View.VISIBLE
-                binding.tvEmptyState.text = "No contacts added for you"
-            }
-        }
-    }
-
-    private fun updateBalanceUI(user: User) {
-        val binding = _binding ?: return
-        val seconds = user.balance_remaining_seconds
-        binding.tvBalanceValue.text = formatBalance(seconds)
-
-        // Progress bar: Use a larger scale, e.g., 24 hours (36000 seconds)
-        // or dynamic based on initial balance. For now, 10 hours.
-        val maxSeconds = 36000L
-        binding.pbBalance.max = maxSeconds.toInt()
-        binding.pbBalance.progress = seconds.toInt().coerceIn(0, maxSeconds.toInt())
-        
-        Log.d("Dashboard abhishek", "Balance UI updated: $seconds seconds")
-    }
-
-    private fun formatBalance(seconds: Long): String {
-        val remainingSeconds = seconds % 60
-        val totalMinutes = seconds / 60
-        val remainingMinutes = totalMinutes % 60
-        val hours = totalMinutes / 60
-
-        return String.format("%02d:%02d:%02d Hours", hours, remainingMinutes, remainingSeconds)
-    }
-
-    private fun navigateToCall(contact: Contact, type: String) {
-        if (userId == null) {
-            Toast.makeText(context, "Error: User ID not found", Toast.LENGTH_SHORT).show()
-            return
-        }
-        
-        val bundle = Bundle().apply {
-            putString("contact_id", contact.contact_id)
-            putString("call_type", type)
-            putString("user_id", userId)
-            putString("phone_number", contact.phone_number)
-            putString("inmate_name", inmateName) // Prisoner Name from users table
-            putString("jail_name", jailName)     // Jail Name from users table
-        }
-        val fragment = CallRoomFragment().apply {
-            arguments = bundle
-        }
-        (activity as? KioskMainActivity)?.navigateToFragment(fragment)
-    }
+    private fun setupListeners() {}
 
     override fun onDestroyView() {
         super.onDestroyView()
-        balancePollJob?.cancel()
         _binding = null
     }
 }

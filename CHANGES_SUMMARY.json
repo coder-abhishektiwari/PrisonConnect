@@ -1,0 +1,88 @@
+{
+  "project": "PrisonConnect",
+  "last_updated": "2026-07-22",
+  "issues_fixed": [
+    {
+      "id": 1,
+      "title": "Room Not Found Error",
+      "problem": "VideoCallActivity and AudioCallActivity generated a room_id and sent it via SMS, but never created the room record in the Supabase call_rooms table. When the web client opened the link and queried the database, the room didn't exist.",
+      "fix": "Added createRoomRecord() to both activities that inserts the room into the database BEFORE sending the SMS link.",
+      "files_changed": [
+        "app/src/main/java/com/example/prisonconnect/VideoCallActivity.kt",
+        "app/src/main/java/com/example/prisonconnect/AudioCallActivity.kt"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "OTP Not Sending",
+      "problem": "Activities showed 'Link opened!' but never sent the OTP SMS. The OTP sending logic only existed in CallRoomFragment.",
+      "fix": "Added sendOtpSms() to both activities, triggered when the web client opens the link (SiteOpened event). Now sends the 6-digit access code via SMS.",
+      "files_changed": [
+        "app/src/main/java/com/example/prisonconnect/VideoCallActivity.kt",
+        "app/src/main/java/com/example/prisonconnect/AudioCallActivity.kt"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "WebRTC Crash (Fatal Error)",
+      "problem": "Fatal error: AddStream is not available with Unified Plan SdpSemantics - app crashed when activating a call.",
+      "fix": "Replaced deprecated addStream() with addTrack() in WebRtcManager. Also replaced onAddStream observer with onAddTrack.",
+      "files_changed": [
+        "app/src/main/java/com/example/prisonconnect/webrtc/WebRtcManager.kt"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "One-Way Media (Video/Audio Not Sending)",
+      "problem": "Android's video/audio was not being sent to the web client. Web saw themselves, Android saw web, but Android's own media wasn't transmitted.",
+      "fix": "Tracks are now added to the peer connection immediately when created (in setupLocalAudio() and setupLocalVideo()). createOffer() now waits for tracks to be ready before creating the SDP offer.",
+      "files_changed": [
+        "app/src/main/java/com/example/prisonconnect/webrtc/WebRtcManager.kt",
+        "app/src/main/java/com/example/prisonconnect/VideoCallActivity.kt",
+        "app/src/main/java/com/example/prisonconnect/AudioCallActivity.kt"
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Demo Mode Added",
+      "problem": "Need to test without spending SMS credits or triggering rate limits.",
+      "fix": "Created a modular SMS system with demo mode: SmsConfig.DEMO_MODE = false sends real SMS via Twilio; SmsConfig.DEMO_MODE = true logs SMS to console with no network call.",
+      "files_created": [
+        "app/src/main/java/com/example/prisonconnect/config/SmsConfig.kt",
+        "app/src/main/java/com/example/prisonconnect/webrtc/DemoSmsSender.kt"
+      ],
+      "files_changed": [
+        "app/src/main/java/com/example/prisonconnect/webrtc/SmsController.kt"
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Local Video Preview Black Screen",
+      "problem": "During video calls, the phone's local video preview was black even though camera was active and video was being sent to web. Remote video worked fine.",
+      "fix": "Reordered initialization in activateWebRtc() to initialize localView AFTER webRtcManager.startLocalStream() so the SurfaceViewRenderer attaches to an already-created video track.",
+      "files_changed": [
+        "app/src/main/java/com/example/prisonconnect/VideoCallActivity.kt"
+      ]
+    }
+  ],
+  "complete_call_flow": [
+    "Inmate initiates call -> Room created in Supabase with status WAITING + OTP generated",
+    "SMS link sent to contact's phone",
+    "Contact opens link -> Web client finds room -> broadcasts site-opened",
+    "Android receives event -> updates status to OTP_SENT -> sends OTP SMS",
+    "Contact enters OTP -> verifies -> status becomes ACTIVE",
+    "WebRTC connects -> tracks added to PC -> offer created with media -> call established"
+  ],
+  "key_files_modified": [
+    "VideoCallActivity.kt",
+    "AudioCallActivity.kt",
+    "WebRtcManager.kt",
+    "SmsController.kt"
+  ],
+  "files_created": [
+    "SmsConfig.kt",
+    "DemoSmsSender.kt",
+    "CHANGES_SUMMARY.md",
+    "CHANGES_SUMMARY.json"
+  ]
+}

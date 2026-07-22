@@ -11,11 +11,25 @@ import com.example.prisonconnect.repository.StorageService
 import kotlinx.coroutines.*
 import java.io.File
 import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.time.Duration.Companion.milliseconds
 
+/**
+ * Foreground service for secure call recording with tamper detection.
+ *
+ * Records call audio/video data to a local file and uploads it to
+ * Supabase Storage when the call ends. Includes a kill-switch interlock
+ * that monitors recording integrity and marks the room as TAMPER_KILLED
+ * if recording is compromised.
+ *
+ * This service runs as a foreground service with appropriate type flags
+ * for camera and microphone access on Android 10+.
+ */
 class SecureHardwareRecordingService : Service() {
 
-    private val TAG = "SecureRecordingService abhishek"
+    private val TAG = "SecureRecordingService"
     private val CHANNEL_ID = "SecureRecordingChannel"
     private val NOTIFICATION_ID = 101
 
@@ -25,9 +39,20 @@ class SecureHardwareRecordingService : Service() {
     private var roomId: String? = null
     private var kioskId: String? = null
     private var sessionId: String? = null
+    private var inmateName: String = "UnknownInmate"
+    private var receiverName: String = "UnknownReceiver"
 
     private var isRecording = false
     private var localFile: File? = null
+
+    companion object {
+        private const val RECORDING_WRITE_INTERVAL_MS = 1000L
+        private const val KILL_SWITCH_INTERVAL_MS = 2500L
+        private const val DATE_FORMAT_PATTERN = "yyyy-MM-dd_HH-mm"
+        private const val SANITIZE_REGEX = "[^a-zA-Z0-9.\\-()]"
+        private const val STORAGE_BUCKET = "recordings"
+        private const val STORAGE_PATH_TEMPLATE = "call_recordings/%s/%s/%s"
+    }
 
     inner class LocalBinder : Binder() {
         fun getService(): SecureHardwareRecordingService = this@SecureHardwareRecordingService
@@ -46,28 +71,30 @@ class SecureHardwareRecordingService : Service() {
         roomId = intent?.getStringExtra("ROOM_ID")
         kioskId = intent?.getStringExtra("KIOSK_ID")
         sessionId = intent?.getStringExtra("SESSION_ID")
+        inmateName = intent?.getStringExtra("INMATE_NAME") ?: "UnknownInmate"
+        receiverName = intent?.getStringExtra("RECEIVER_NAME") ?: "UnknownReceiver"
 
-        // 🌟 Fixed: Android Oreo and above ke background bounds safely handling target definitions
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(
-                NOTIFICATION_ID,
-                createNotification(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            )
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                createNotification(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, createNotification())
-        }
+        startForegroundWithType()
 
         startRecording()
         startKillSwitchInterlock()
 
         return START_STICKY
+    }
+
+    /**
+     * Starts the service as a foreground service with appropriate type flags.
+     * On Android 14+ (U), camera and microphone types are required for media recording.
+     */
+    private fun startForegroundWithType() {
+        val notification = createNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            startForeground(NOTIFICATION_ID, notification, serviceType)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
     }
 
     private fun createNotificationChannel() {
@@ -92,12 +119,18 @@ class SecureHardwareRecordingService : Service() {
             .build()
     }
 
+    /**
+     * Starts the recording loop that writes simulated stream data to a local file.
+     * In a production system, this would capture actual audio/video frames.
+     */
     private fun startRecording() {
-        Log.d("TAG", "Starting secure recording...")
+        Log.d(TAG, "Starting secure recording for $inmateName -> $receiverName")
         isRecording = true
 
-        val fileName = "rec_${System.currentTimeMillis()}.mp4"
-        localFile = File(cacheDir, fileName)
+        val timestamp = SimpleDateFormat(DATE_FORMAT_PATTERN, Locale.getDefault()).format(Date())
+        val rawFileName = "${inmateName}-${receiverName}($timestamp).mp4"
+        val sanitizedFileName = rawFileName.replace(SANITIZE_REGEX.toRegex(), "_")
+        localFile = File(cacheDir, sanitizedFileName)
 
         serviceScope.launch {
             try {
@@ -105,7 +138,7 @@ class SecureHardwareRecordingService : Service() {
                     while (isRecording) {
                         fos.write("VIDEO_AUDIO_STREAM_DATA".toByteArray())
                         fos.flush()
-                        delay(1000.milliseconds)
+                        delay(RECORDING_WRITE_INTERVAL_MS.milliseconds)
                     }
                 }
             } catch (e: CancellationException) {
@@ -117,10 +150,14 @@ class SecureHardwareRecordingService : Service() {
         }
     }
 
+    /**
+     * Periodic integrity check that monitors the recording file.
+     * If the file is missing or empty, triggers tamper detection.
+     */
     private fun startKillSwitchInterlock() {
         serviceScope.launch {
             while (isRecording) {
-                delay(2500.milliseconds)
+                delay(KILL_SWITCH_INTERVAL_MS.milliseconds)
                 if (!checkRecordingIntegrity()) {
                     handleTamperDetected()
                     break
@@ -129,11 +166,20 @@ class SecureHardwareRecordingService : Service() {
         }
     }
 
+    /**
+     * Checks that the recording file exists and has content.
+     *
+     * @return true if the file exists and has non-zero length
+     */
     private fun checkRecordingIntegrity(): Boolean {
         val file = localFile ?: return false
         return file.exists() && file.length() > 0
     }
 
+    /**
+     * Handles a tamper detection event by marking the room as TAMPER_KILLED
+     * and stopping the service.
+     */
     private fun handleTamperDetected() {
         Log.e(TAG, "TAMPER DETECTED! Terminating call and updating Supabase.")
         isRecording = false
@@ -141,7 +187,12 @@ class SecureHardwareRecordingService : Service() {
         roomId?.let { id ->
             serviceScope.launch {
                 try {
-                    DbService.updateFieldsByColumn("call_rooms", "room_id", id, mapOf("room_status" to "TAMPER_KILLED"))
+                    DbService.updateFieldsByColumn(
+                        "call_rooms",
+                        "room_id",
+                        id,
+                        mapOf("room_status" to "TAMPER_KILLED")
+                    )
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to update tamper status", e)
                 }
@@ -152,6 +203,10 @@ class SecureHardwareRecordingService : Service() {
         } ?: stopSelf()
     }
 
+    /**
+     * Stops recording and uploads the recorded file to Supabase Storage.
+     * Called by the activity/fragment when the call ends normally.
+     */
     fun stopAndUpload() {
         Log.d(TAG, "Stopping recording and initiating upload...")
         isRecording = false
@@ -169,10 +224,14 @@ class SecureHardwareRecordingService : Service() {
 
         serviceScope.launch {
             try {
-                val storagePath = "call_recordings/$kioskId/$sessionId/${file.name}"
-                // 🌟 Supabase Integration handles standard java File path bytes conversion safely now
+                val storagePath = String.format(
+                    STORAGE_PATH_TEMPLATE,
+                    kioskId ?: "unknown",
+                    sessionId ?: "unknown",
+                    file.name
+                )
                 StorageService.uploadFile(
-                    bucket = "recordings",
+                    bucket = STORAGE_BUCKET,
                     path = storagePath,
                     file = file
                 )

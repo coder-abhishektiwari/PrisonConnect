@@ -1,6 +1,5 @@
 package com.example.prisonconnect
 
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.prisonconnect.model.Contact
@@ -9,12 +8,22 @@ import com.example.prisonconnect.repository.ContactRepository
 import com.example.prisonconnect.repository.SupabaseContactRepository
 import com.example.prisonconnect.repository.UserRepository
 import com.example.prisonconnect.repository.SupabaseUserRepository
+import com.example.prisonconnect.util.Logger
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
+/**
+ * ViewModel for the Dashboard screen.
+ *
+ * Manages:
+ * - User data observation (name, balance)
+ * - Contacts list observation
+ * - Loading state
+ */
 class DashboardViewModel : ViewModel() {
 
-    private val TAG = "DashboardViewModel"
+    private val logger = Logger("DashboardViewModel")
+
     private val userRepository: UserRepository = SupabaseUserRepository()
     private val contactRepository: ContactRepository = SupabaseContactRepository()
 
@@ -27,23 +36,34 @@ class DashboardViewModel : ViewModel() {
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    /**
+     * Loads user data and contacts for the given user ID.
+     * Observes both streams concurrently.
+     *
+     * @param userId The user's UUID
+     */
     fun loadData(userId: String) {
         _isLoading.value = true
+        logger.d("Loading data for user: $userId")
         viewModelScope.launch {
             launch {
                 userRepository.observeUser(userId)
-                    .onEach { _user.value = it }
-                    .catch { Log.e(TAG, "Error observing user", it) }
+                    .onEach { userData ->
+                        _user.value = userData
+                    }
+                    .catch { throwable ->
+                        logger.e("Error observing user", throwable)
+                    }
                     .collect()
             }
             launch {
                 contactRepository.observeContacts(userId)
-                    .onEach { 
-                        _contacts.value = it
+                    .onEach { contactList ->
+                        _contacts.value = contactList
                         _isLoading.value = false
                     }
-                    .catch { 
-                        Log.e(TAG, "Error observing contacts", it)
+                    .catch { throwable ->
+                        logger.e("Error observing contacts", throwable)
                         _isLoading.value = false
                     }
                     .collect()

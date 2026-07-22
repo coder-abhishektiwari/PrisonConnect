@@ -1,0 +1,4 @@
+- [ ] Update `WebRtcManager.kt`: Add explicit Audio Transceiver for audio calls
+- [ ] Update `CallRoomFragment.kt`: Explicit Media Constraints and fallback trigger
+- [ ] Update `index.html`: Reliable `web-ready` broadcast and constraints
+- [ ] Verify build and functionality

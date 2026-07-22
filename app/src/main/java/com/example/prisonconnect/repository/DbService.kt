@@ -1,6 +1,7 @@
 package com.example.prisonconnect.repository
 
 import com.example.prisonconnect.config.SupabaseConfig
+import android.util.Log
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Order
 import kotlinx.coroutines.Dispatchers
@@ -13,6 +14,9 @@ import kotlinx.serialization.json.putJsonObject
 object DbService {
 
     @PublishedApi
+    internal const val TAG = "DbService"
+
+    @PublishedApi
     internal val client get() = SupabaseConfig.client
 
     //  READ: Get a single document by ID (UUID)
@@ -20,28 +24,36 @@ object DbService {
         table: String,
         id: String
     ): T? = withContext(Dispatchers.IO) {
-        client.from(table).select {
-            filter {
-                eq("id", id)
-            }
-            limit(1)
-        }.decodeSingleOrNull<T>()
+        try {
+            client.from(table).select {
+                filter {
+                    eq("id", id)
+                }
+                limit(1)
+            }.decodeSingleOrNull<T>()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching document from $table by ID $id", e)
+            null
+        }
     }
 
     //  READ: Get a single document by any column
-    //  (e.g. query call_rooms by room_id TEXT column)
-
     suspend inline fun <reified T : Any> getDocumentByColumn(
         table: String,
         column: String,
         value: String
     ): T? = withContext(Dispatchers.IO) {
-        client.from(table).select {
-            filter {
-                eq(column, value)
-            }
-            limit(1)
-        }.decodeSingleOrNull<T>()
+        try {
+            client.from(table).select {
+                filter {
+                    eq(column, value)
+                }
+                limit(1)
+            }.decodeSingleOrNull<T>()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching document from $table where $column=$value", e)
+            null
+        }
     }
 
     //  READ: Query documents with an equality filter
@@ -50,11 +62,16 @@ object DbService {
         field: String,
         value: Any
     ): List<T> = withContext(Dispatchers.IO) {
-        client.from(table).select {
-            filter {
-                eq(field, value.toString())
-            }
-        }.decodeList<T>()
+        try {
+            client.from(table).select {
+                filter {
+                    eq(field, value.toString())
+                }
+            }.decodeList<T>()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error querying documents from $table where $field=$value", e)
+            emptyList()
+        }
     }
 
     //  READ: Get all documents from a table
@@ -63,104 +80,145 @@ object DbService {
         orderBy: String? = null,
         ascending: Boolean = true
     ): List<T> = withContext(Dispatchers.IO) {
-        client.from(table).select {
-            orderBy?.let { order(it, if (ascending) Order.ASCENDING else Order.DESCENDING) }
-        }.decodeList<T>()
+        try {
+            client.from(table).select {
+                orderBy?.let { order(it, if (ascending) Order.ASCENDING else Order.DESCENDING) }
+            }.decodeList<T>()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching all documents from $table", e)
+            emptyList()
+        }
     }
 
     //  WRITE: Upsert a document (insert or update)
     suspend inline fun <reified T : Any> upsertDocument(
         table: String,
         body: T
-    ): Unit = withContext(Dispatchers.IO) {
-        client.from(table).upsert(listOf(body))
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            client.from(table).upsert(listOf(body))
+            Unit
+        }.onFailure { Log.e(TAG, "Error upserting to $table", it) }
     }
 
     //  WRITE: Insert a document
     suspend inline fun <reified T : Any> insertDocument(
         table: String,
         body: T
-    ): Unit = withContext(Dispatchers.IO) {
-        client.from(table).insert(listOf(body))
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            client.from(table).insert(listOf(body))
+            Unit
+        }.onFailure { Log.e(TAG, "Error inserting to $table", it) }
     }
 
     //  WRITE: Insert raw data as JsonObject
-    //  (for dynamic maps that can't be @Serializable)
     suspend fun insertRaw(
         table: String,
         data: Map<String, Any>
-    ): Unit = withContext(Dispatchers.IO) {
-        val jsonObject = buildJsonObject {
-            data.forEach { (key, value) ->
-                put(key, jsonValue(value))
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val jsonObject = buildJsonObject {
+                data.forEach { (key, value) ->
+                    put(key, jsonValue(value))
+                }
             }
-        }
-        client.from(table).insert(listOf(jsonObject))
+            client.from(table).insert(listOf(jsonObject))
+            Unit
+        }.onFailure { Log.e(TAG, "Error inserting raw to $table", it) }
     }
 
     //  WRITE: Update specific fields by UUID id
-    //  Uses JsonObject to avoid serialization issues with Map<String, Any>
     suspend fun updateFields(
         table: String,
         id: String,
         fields: Map<String, Any>
-    ): Unit = withContext(Dispatchers.IO) {
-        val jsonObject = buildJsonObject {
-            fields.forEach { (key, value) ->
-                put(key, jsonValue(value))
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val jsonObject = buildJsonObject {
+                fields.forEach { (key, value) ->
+                    put(key, jsonValue(value))
+                }
             }
-        }
-        client.from(table).update(jsonObject) {
-            filter {
-                eq("id", id)
+            client.from(table).update(jsonObject) {
+                filter {
+                    eq("id", id)
+                }
             }
-        }
+            Log.d(TAG, "Updated fields for $table ID $id")
+            Unit
+        }.onFailure { Log.e(TAG, "Error updating fields for $table ID $id", it) }
+    }
+
+    /**
+     * Specifically updates the balance for a user.
+     */
+    suspend fun updateUserBalance(userId: String, balanceSeconds: Long): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val jsonObject = buildJsonObject {
+                put("balance_remaining_seconds", JsonPrimitive(balanceSeconds))
+            }
+            client.from("users").update(jsonObject) {
+                filter {
+                    eq("id", userId)
+                }
+            }
+            Log.d(TAG, "Synced balance to DB: $balanceSeconds s for user: $userId")
+            Unit
+        }.onFailure { Log.e(TAG, "Failed to update balance for user $userId", it) }
     }
 
     //  WRITE: Update specific fields by any column
-    //  (e.g. update call_rooms where room_id = 'xxx')
     suspend fun updateFieldsByColumn(
         table: String,
         column: String,
         columnValue: String,
         fields: Map<String, Any>
-    ): Unit = withContext(Dispatchers.IO) {
-        val jsonObject = buildJsonObject {
-            fields.forEach { (key, value) ->
-                put(key, jsonValue(value))
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val jsonObject = buildJsonObject {
+                fields.forEach { (key, value) ->
+                    put(key, jsonValue(value))
+                }
             }
-        }
-        client.from(table).update(jsonObject) {
-            filter {
-                eq(column, columnValue)
+            client.from(table).update(jsonObject) {
+                filter {
+                    eq(column, columnValue)
+                }
             }
-        }
+            Unit
+        }.onFailure { Log.e(TAG, "Error updating $table where $column=$columnValue", it) }
     }
 
     //  DELETE: Remove a document
     suspend fun deleteDocument(
         table: String,
         id: String
-    ): Unit = withContext(Dispatchers.IO) {
-        client.from(table).delete {
-            filter {
-                eq("id", id)
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            client.from(table).delete {
+                filter {
+                    eq("id", id)
+                }
             }
-        }
+            Unit
+        }.onFailure { Log.e(TAG, "Error deleting from $table ID $id", it) }
     }
 
     //  DELETE: Remove a document by any column
-    //  (e.g. delete call_rooms where room_id = 'xxx')
     suspend fun deleteByColumn(
         table: String,
         column: String,
         value: String
-    ): Unit = withContext(Dispatchers.IO) {
-        client.from(table).delete {
-            filter {
-                eq(column, value)
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            client.from(table).delete {
+                filter {
+                    eq(column, value)
+                }
             }
-        }
+            Unit
+        }.onFailure { Log.e(TAG, "Error deleting from $table where $column=$value", it) }
     }
 
     //  Real-time listener (polling-based fallback)
