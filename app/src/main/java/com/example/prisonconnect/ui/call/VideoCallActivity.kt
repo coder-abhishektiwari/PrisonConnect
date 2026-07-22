@@ -18,11 +18,12 @@ class VideoCallActivity : BaseCallActivity<ActivityVideoCallBinding>() {
 
     override val tag = "VideoCallActivity"
     override val isVideoMode = true
+    private var isMicEnabled = true
 
     override fun inflateBinding() = ActivityVideoCallBinding.inflate(layoutInflater)
 
     override fun setupCallUi() {
-        binding.tvVideoName.text = inmateName
+        binding.tvVideoName.text = contactName
 
         binding.btnVideoHangup.setOnClickListener { confirmExit() }
         binding.btnCancelCall.setOnClickListener{ confirmExit() }
@@ -88,11 +89,16 @@ class VideoCallActivity : BaseCallActivity<ActivityVideoCallBinding>() {
     }
 
     private fun toggleMic() {
-        val enabled = !binding.btnVideoMic.isActivated
-        webRtcManager.setAudioEnabled(enabled)
-        binding.btnVideoMic.isActivated = enabled
+        updateMicUI()
+        isMicEnabled = !isMicEnabled
+        webRtcManager.setAudioEnabled(isMicEnabled)
+    }
 
-        if (enabled) {
+    private fun updateMicUI() {
+        binding.btnVideoMic.isActivated = isMicEnabled
+        binding.btnVideoMic.alpha = if (isMicEnabled) 1f else 0.6f
+
+        if (isMicEnabled) {
             binding.btnVideoMic.setIconResource(R.drawable.ic_mic)
             binding.btnVideoMic.setIconTintResource(R.color.white)
         } else {

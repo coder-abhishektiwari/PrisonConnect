@@ -140,11 +140,18 @@ object DbService {
                     put(key, jsonValue(value))
                 }
             }
-            client.from(table).update(jsonObject) {
+            // Use select() to ensure the update actually affected a row (detects RLS blocks)
+            val result = client.from(table).update(jsonObject) {
                 filter {
                     eq("id", id)
                 }
+                select()
+            }.decodeList<JsonObject>()
+            
+            if (result.isEmpty()) {
+                throw Exception("Update failed: No rows affected. Check RLS policies for table $table")
             }
+            
             Log.d(TAG, "Updated fields for $table ID $id")
             Unit
         }.onFailure { Log.e(TAG, "Error updating fields for $table ID $id", it) }
@@ -158,11 +165,17 @@ object DbService {
             val jsonObject = buildJsonObject {
                 put("balance_remaining_seconds", JsonPrimitive(balanceSeconds))
             }
-            client.from("users").update(jsonObject) {
+            val result = client.from("users").update(jsonObject) {
                 filter {
                     eq("id", userId)
                 }
+                select()
+            }.decodeList<JsonObject>()
+            
+            if (result.isEmpty()) {
+                throw Exception("Balance update failed: RLS block or invalid User ID ($userId)")
             }
+            
             Log.d(TAG, "Synced balance to DB: $balanceSeconds s for user: $userId")
             Unit
         }.onFailure { Log.e(TAG, "Failed to update balance for user $userId", it) }
@@ -181,10 +194,15 @@ object DbService {
                     put(key, jsonValue(value))
                 }
             }
-            client.from(table).update(jsonObject) {
+            val result = client.from(table).update(jsonObject) {
                 filter {
                     eq(column, columnValue)
                 }
+                select()
+            }.decodeList<JsonObject>()
+            
+            if (result.isEmpty()) {
+                throw Exception("Update failed: No rows affected for $column=$columnValue in $table")
             }
             Unit
         }.onFailure { Log.e(TAG, "Error updating $table where $column=$columnValue", it) }

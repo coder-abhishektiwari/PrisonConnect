@@ -4,7 +4,6 @@ import android.content.*
 import android.os.Bundle
 import android.os.IBinder
 import android.util.Log
-import android.view.View
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -47,6 +46,7 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
     protected var contactPhone: String = ""
     protected var jailName: String = ""
     protected var initialBalance: Long = 0L
+    protected var contactName: String= ""
     protected var roomOtp: String = ""
     protected var roomToken: String = ""
     protected var isOtpSent: Boolean = false
@@ -58,7 +58,9 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
 
     protected var isCallStarted = AtomicBoolean(false)
     protected var isOfferSent = AtomicBoolean(false)
+    protected var isEnding = AtomicBoolean(false)
     protected var isRemoteDescriptionSet = false
+    protected var isOfferDeferred = AtomicBoolean(false)
     protected val remoteCandidatesQueue = mutableListOf<IceCandidate>()
 
     // Services
@@ -138,6 +140,7 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
         contactPhone = intent.getStringExtra("phone_number") ?: ""
         jailName = intent.getStringExtra("jail_name") ?: ""
         initialBalance = intent.getLongExtra("initial_balance", 0L)
+        contactName = intent.getStringExtra("contact_name") ?: ""
         log("Extracted arguments: room=$roomId, inmate=$inmateId")
     }
 
@@ -304,8 +307,13 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
                     if (isConnected) {
                         log("Peer already connected, ignoring redundant WebReady")
                     } else {
-                        log("Peer signaled WebReady but not connected, triggering recovery")
-                        resetNegotiation()
+                        if (webRtcManager.isTracksReady) {
+                            log("Peer signaled WebReady, triggering offer")
+                            resetNegotiation()
+                        } else {
+                            log("Peer signaled WebReady but tracks NOT ready. Deferring offer.")
+                            isOfferDeferred.set(true)
+                        }
                     }
                 }
             }
@@ -407,15 +415,35 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
     }
 
     protected fun teardownAndExit() {
-        viewModel.endCall()
-        releaseResources()
-        showSummaryDialog()
+        if (!isEnding.compareAndSet(false, true)) {
+            log("teardownAndExit: Already in progress, skipping")
+            return
+        }
+        
+        log("Initiating call teardown...")
+        
+        lifecycleScope.launch(Dispatchers.Main) {
+            // 1. Signal end to server/peer
+            try {
+                viewModel.endCall()
+            } catch (e: Exception) {
+                log("Error signaling end call", e)
+            }
+            
+            // 2. Clear UI/Hardware immediately to release camera/mic
+            releaseResources()
+            
+            // 3. Show summary dialog
+            // We use a small post to ensure the UI has settled after hardware release
+            delay(200)
+            showSummaryDialog()
+        }
     }
 
     protected open fun releaseResources() {
-        stopRecordingService()
-        webRtcManager.cleanup()
         try {
+            stopRecordingService()
+            webRtcManager.cleanup()
             eglBase.release()
         } catch (e: Exception) {
             log("Error releasing WebRTC resources", e)
@@ -483,8 +511,14 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
     }
 
     override fun onLocalTrackReady() {
-        log("Local track is ready, creating offer if needed...")
-        createOffer()
+        log("Local track is ready.")
+        if (isOfferDeferred.compareAndSet(true, false)) {
+            log("Executing deferred offer now that tracks are ready.")
+            createOffer()
+        } else {
+            // Standard flow if WebReady hasn't arrived yet
+            createOffer()
+        }
     }
 
     protected fun formatSeconds(totalSeconds: Long): String {

@@ -17,12 +17,13 @@ class AudioCallActivity : BaseCallActivity<ActivityAudioCallBinding>() {
 
     override val tag = "AudioCallActivity"
     override val isVideoMode = false
+    private var isMicEnabled = true
     private var isSpeakerEnabled = false
 
     override fun inflateBinding() = ActivityAudioCallBinding.inflate(layoutInflater)
 
     override fun setupCallUi() {
-        binding.tvAudioName.text = inmateName
+        binding.tvAudioName.text = contactName
         binding.tvAudioPhone.text = contactPhone
 
         binding.btnAudioHangup.setOnClickListener { confirmExit() }
@@ -72,13 +73,37 @@ class AudioCallActivity : BaseCallActivity<ActivityAudioCallBinding>() {
         }
     }
 
-    private fun toggleMic() {
-        val enabled = !binding.btnAudioMic.isActivated
-        webRtcManager.setAudioEnabled(enabled)
-        binding.btnAudioMic.isActivated = enabled
-        binding.btnAudioMic.alpha = if (enabled) 1.0f else 0.6f
 
-        if (enabled) {
+//    private fun initAudioControls() {
+//        isMicEnabled = true
+//        isSpeakerEnabled = true // ya false
+//
+//        webRtcManager.setAudioEnabled(isMicEnabled)
+//        webRtcManager.setSpeakerphoneOn(isSpeakerEnabled)
+//
+//        // Mic UI
+//        binding.btnAudioMic.isActivated = isMicEnabled
+//        binding.btnAudioMic.alpha = if (isMicEnabled) 1f else 0.6f
+//        binding.btnAudioMic.setIconResource(
+//            if (isMicEnabled) R.drawable.ic_mic else R.drawable.ic_mic_off
+//        )
+//
+//        // Speaker UI
+//        binding.btnAudioSpeaker.isActivated = isSpeakerEnabled
+//        binding.btnAudioSpeaker.alpha = if (isSpeakerEnabled) 1f else 0.6f
+//    }
+
+    private fun toggleMic() {
+        updateMicUI()
+        isMicEnabled = !isMicEnabled
+        webRtcManager.setAudioEnabled(isMicEnabled)
+    }
+
+    private fun updateMicUI() {
+        binding.btnAudioMic.isActivated = isMicEnabled
+        binding.btnAudioMic.alpha = if (isMicEnabled) 1f else 0.6f
+
+        if (isMicEnabled) {
             binding.btnAudioMic.setIconResource(R.drawable.ic_mic)
             binding.btnAudioMic.setIconTintResource(R.color.white)
         } else {
@@ -89,8 +114,16 @@ class AudioCallActivity : BaseCallActivity<ActivityAudioCallBinding>() {
 
     private fun toggleSpeaker() {
         isSpeakerEnabled = !isSpeakerEnabled
+
+        binding.btnAudioSpeaker.isActivated = isSpeakerEnabled
+        binding.btnAudioSpeaker.alpha = if (isSpeakerEnabled) 1f else 0.6f
+
+        if (isSpeakerEnabled) {
+            binding.btnAudioSpeaker.setIconTintResource(R.color.primary)
+        } else {
+            binding.btnAudioSpeaker.setIconTintResource(R.color.white)
+        }
         webRtcManager.setSpeakerphoneOn(isSpeakerEnabled)
-        binding.btnAudioSpeaker.setIconTintResource(if (isSpeakerEnabled) R.color.primary else R.color.white)
     }
 
     private fun showCallInfoTooltip() {
