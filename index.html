@@ -352,6 +352,9 @@
     const SUPABASE_URL = "https://vfqufosgzaatydvikuas.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_31-6_doFy14yTBlLKYil7g_Y0E3Gj7I";
 
+
+
+
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     const params = new URLSearchParams(location.search);
@@ -438,8 +441,16 @@
         config: { broadcast: { self: false } }
       });
 
+      const safeSend = (msg) => {
+        try {
+          roomChannel.send(msg);
+        } catch(e) {
+          console.warn("Signaling send failed", e);
+        }
+      };
+
       // Notify Link Opened
-      roomChannel.send({
+      safeSend({
         type: 'broadcast',
         event: 'site-opened',
         payload: { sender: 'web' }
@@ -476,8 +487,8 @@
         if (valid) {
           log('Access granted.', 'ok');
           isSessionAuthorized = true;
-          roomChannel.send({ type: 'broadcast', event: 'otp-verified', payload: { sender: 'web' } });
-          startWebRtc(roomChannel);
+          safeSend({ type: 'broadcast', event: 'otp-verified', payload: { sender: 'web' } });
+          startWebRtc(roomChannel, safeSend);
         } else {
           log('Incorrect code.', 'warn');
           document.getElementById('otpError').textContent = 'Invalid code.';
@@ -495,9 +506,37 @@
     let seconds = 0;
     let isMicMuted = false;
     let currentFacingMode = 'user';
+    let pendingCandidates = [];
+    let candidateTimer = null;
+    let isWebReadySent = false;
 
     const rtcConfig = {
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun1.l.google.com:19302" },
+        { urls: "stun:stun2.l.google.com:19302" },
+        { urls: "stun:stun.relay.metered.ca:80" },
+        {
+          urls: "turn:global.relay.metered.ca:80",
+          username: "57a73cc43754da4ba6357595",
+          credential: "q/qfur4DQF/CddhR"
+        },
+        {
+          urls: "turn:global.relay.metered.ca:80?transport=tcp",
+          username: "57a73cc43754da4ba6357595",
+          credential: "q/qfur4DQF/CddhR"
+        },
+        {
+          urls: "turn:global.relay.metered.ca:443",
+          username: "57a73cc43754da4ba6357595",
+          credential: "q/qfur4DQF/CddhR"
+        },
+        {
+          urls: "turns:global.relay.metered.ca:443?transport=tcp",
+          username: "57a73cc43754da4ba6357595",
+          credential: "q/qfur4DQF/CddhR"
+        }
+      ]
     };
 
     function formatTime(totalSeconds) {
@@ -509,6 +548,19 @@
 
     async function startWebRtc(channel) {
       showScreen('screen-call');
+
+      const safeSend = (msg) => {
+        try { channel.send(msg); } catch(e) { console.warn("Send failed", e); }
+      };
+
+      const sendCandidateBatch = () => {
+        if (pendingCandidates.length === 0) return;
+        const candidates = [...pendingCandidates];
+        pendingCandidates = [];
+        if (candidateTimer) clearTimeout(candidateTimer);
+        candidateTimer = null;
+        safeSend({ type: 'broadcast', event: 'candidates-batch', payload: { sender: 'web', candidates } });
+      };
 
       // Fullscreen/Immersive setup
       document.body.style.padding = '0';
@@ -541,15 +593,17 @@
 
         peerConnection.onicecandidate = (e) => {
           if (e.candidate) {
-            channel.send({
-              type: 'broadcast',
-              event: 'candidates-batch',
-              payload: { sender: 'web', candidates: [{
-                candidate: e.candidate.candidate,
-                sdpMid: e.candidate.sdpMid,
-                sdpMLineIndex: e.candidate.sdpMLineIndex
-              }]}
+            pendingCandidates.push({
+              candidate: e.candidate.candidate,
+              sdpMid: e.candidate.sdpMid,
+              sdpMLineIndex: e.candidate.sdpMLineIndex
             });
+
+            if (pendingCandidates.length >= 5) {
+              sendCandidateBatch();
+            } else if (!candidateTimer) {
+              candidateTimer = setTimeout(() => sendCandidateBatch(), 200);
+            }
           }
         };
 
@@ -557,21 +611,32 @@
         channel
           .on('broadcast', { event: 'offer' }, async ({ payload }) => {
             if (payload.sender === 'android') {
+              log("Offer received from Kiosk");
+              if (peerConnection.signalingState !== "stable") {
+                log("PeerConnection not stable, ignoring redundant offer", "warn");
+                return;
+              }
               await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.offer));
               const answer = await peerConnection.createAnswer();
               await peerConnection.setLocalDescription(answer);
-              channel.send({ type: 'broadcast', event: 'answer', payload: { sender: 'web', answer } });
+              safeSend({ type: 'broadcast', event: 'answer', payload: { sender: 'web', answer } });
             }
           })
           .on('broadcast', { event: 'candidates-batch' }, async ({ payload }) => {
             if (payload.sender === 'android') {
-              payload.candidates.forEach(c => peerConnection.addIceCandidate(new RTCIceCandidate(c)));
+              payload.candidates.forEach(c => {
+                 if (c.candidate) {
+                   peerConnection.addIceCandidate(new RTCIceCandidate(c)).catch(e => {});
+                 }
+              });
             }
           })
           .on('broadcast', { event: 'hangup' }, () => terminateCall())
           .subscribe((status) => {
-             if (status === 'SUBSCRIBED') {
-                channel.send({ type: 'broadcast', event: 'web-ready', payload: { sender: 'web' } });
+             if (status === 'SUBSCRIBED' && !isWebReadySent) {
+                isWebReadySent = true;
+                log("Signaling channel ready", "ok");
+                safeSend({ type: 'broadcast', event: 'web-ready', payload: { sender: 'web' } });
              }
           });
 
@@ -607,8 +672,16 @@
 
     function terminateCall() {
       clearInterval(callTimer);
+      if (candidateTimer) clearTimeout(candidateTimer);
+      pendingCandidates = [];
+      isWebReadySent = false;
+
       if (localStream) localStream.getTracks().forEach(t => t.stop());
-      if (peerConnection) peerConnection.close();
+      if (peerConnection) {
+        peerConnection.onicecandidate = null;
+        peerConnection.ontrack = null;
+        peerConnection.close();
+      }
       document.querySelector('.video-header .timer').textContent = 'Call Ended';
       document.getElementById('audioTimer').textContent = 'Call Ended';
       setTimeout(() => window.location.reload(), 3000);

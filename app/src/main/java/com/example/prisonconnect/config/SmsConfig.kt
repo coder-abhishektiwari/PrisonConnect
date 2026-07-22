@@ -1,14 +1,18 @@
 package com.example.prisonconnect.config
 
+enum class SmsMode {
+    TWILIO, LOG, DEVICE
+}
+
 object SmsConfig {
     /**
-     * When true, SMS messages are only logged to console and NOT actually sent.
-     * Use this for demo/testing without spending SMS credits or triggering rate limits.
+     * Active SMS delivery mode.
+     * Select from: TWILIO, LOG, DEVICE
      */
-    const val DEMO_MODE = true
+    val SMS_MODE = SmsMode.LOG
 
     /**
-     * In demo mode, show the OTP in the log so testers can enter it manually.
+     * In log mode, show the OTP in the log so testers can enter it manually.
      */
     const val LOG_OTP_IN_DEMO = true
 
