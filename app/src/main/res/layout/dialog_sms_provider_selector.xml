@@ -55,7 +55,7 @@
                     android:layout_width="48dp"
                     android:layout_height="48dp"
                     android:src="@drawable/ic_cloud_sms"
-                    app:tint="?attr/colorPrimary" />
+                    app:tint="@color/danger" />
 
                 <TextView
                     android:layout_width="wrap_content"
@@ -100,7 +100,7 @@
                     android:layout_width="48dp"
                     android:layout_height="48dp"
                     android:src="@drawable/ic_sim_card"
-                    app:tint="?attr/colorSecondary" />
+                    app:tint="@color/sms" />
 
                 <TextView
                     android:layout_width="wrap_content"

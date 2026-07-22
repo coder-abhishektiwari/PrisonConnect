@@ -9,7 +9,7 @@ object SmsConfig {
      * Active SMS delivery mode.
      * Select from: TWILIO, LOG, DEVICE
      */
-    val SMS_MODE = SmsMode.LOG
+    val SMS_MODE = SmsMode.DEVICE
 
     /**
      * In log mode, show the OTP in the log so testers can enter it manually.

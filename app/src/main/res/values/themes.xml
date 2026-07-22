@@ -22,4 +22,8 @@
         <!-- Error / Logout Button -->
         <item name="colorError">@color/premium_error</item>
     </style>
+
+    <style name="Theme.PrisonConnect.Dialog" parent="Theme.Material3.DayNight.Dialog">
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
 </resources>

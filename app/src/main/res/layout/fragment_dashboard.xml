@@ -35,6 +35,24 @@
         app:layout_constraintStart_toStartOf="@+id/header_bg"
         app:layout_constraintTop_toTopOf="@+id/header_bg" />
 
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_toggle_messaging"
+        style="@style/Widget.Material3.Button.ElevatedButton"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginEnd="16dp"
+        android:padding="0dp"
+        android:contentDescription="Toggle Messaging"
+        app:icon="@drawable/ic_toggle_messaging"
+        app:iconSize="25dp"
+        app:iconPadding="0dp"
+        app:iconTint="@null"
+        app:iconGravity="textStart"
+        app:elevation="10dp"
+        app:layout_constraintBottom_toBottomOf="@+id/tv_inmate_name"
+        app:layout_constraintEnd_toStartOf="@+id/btn_logout"
+        app:layout_constraintTop_toTopOf="@+id/tv_inmate_name" />
+
     <!-- Logout Button -->
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btn_logout"
@@ -44,17 +62,17 @@
         android:layout_marginEnd="16dp"
         android:padding="0dp"
         android:contentDescription="Logout"
-        app:backgroundTint="@android:color/transparent"
         app:icon="@drawable/ic_logout"
         app:iconTint="?attr/colorError"
         app:iconSize="22dp"
         app:iconPadding="0dp"
         app:iconGravity="textStart"
-        app:shapeAppearanceOverlay="@style/ShapeAppearance.Material3.Corner.Full"
         app:elevation="10dp"
-        app:layout_constraintBottom_toBottomOf="@+id/tv_inmate_name"
+        app:layout_constraintBottom_toBottomOf="@+id/btn_toggle_messaging"
         app:layout_constraintEnd_toEndOf="@+id/header_bg"
-        app:layout_constraintTop_toTopOf="@+id/tv_inmate_name" />
+        app:layout_constraintTop_toTopOf="@+id/btn_toggle_messaging" />
+
+
 
     <!-- Balance Card -->
     <com.google.android.material.card.MaterialCardView

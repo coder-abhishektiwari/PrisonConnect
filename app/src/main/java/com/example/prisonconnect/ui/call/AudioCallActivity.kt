@@ -26,6 +26,7 @@ class AudioCallActivity : BaseCallActivity<ActivityAudioCallBinding>() {
         binding.tvAudioPhone.text = contactPhone
 
         binding.btnAudioHangup.setOnClickListener { confirmExit() }
+        binding.btnCancelCall.setOnClickListener { confirmExit() }
         binding.btnAudioMic.setOnClickListener { toggleMic() }
         binding.btnAudioSpeaker.setOnClickListener { toggleSpeaker() }
         binding.btnAudioInfo.setOnClickListener { showCallInfoTooltip() }

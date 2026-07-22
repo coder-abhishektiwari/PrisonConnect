@@ -23,4 +23,5 @@
 
     <color name="primary">#5FC760</color>
     <color name="danger">#FFB00020</color>
+    <color name="sms">#FDDC69</color>
 </resources>

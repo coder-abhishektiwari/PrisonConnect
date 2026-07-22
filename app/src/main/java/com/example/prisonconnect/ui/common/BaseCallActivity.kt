@@ -200,14 +200,24 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
                 updateLobbyStatus("❌ Failed to initialize call room.")
                 return@launch
             }
+
             val typeStr = if (isVideoMode) "Video" else "Audio"
-            val smsLink = "https://prisonconnect-call.rf.gd/index.html?room=$roomId&token=$roomToken"
-            val linkMessage = "PrisonConnect: $typeStr call from $inmateName at $jailName. Join: $smsLink"
-            smsController.sendSmsViaSupabase(contactPhone, linkMessage)
-            updateLobbyStatus("📱 Call link sent to $contactPhone")
+            val smsLink =
+                "https://prisonconnect-call.rf.gd/index.html?room=$roomId&token=$roomToken"
+
+            val linkMessage =
+                "PrisonConnect: $typeStr call from $inmateName at $jailName. Join: $smsLink"
+
+            val result = smsController.sendSmsViaSupabase(contactPhone, linkMessage)
+
+            result.onSuccess {
+                updateLobbyStatus("📱 Call link sent to $contactPhone")
+            }.onFailure { error ->
+                updateLobbyStatus("❌ Failed to send call link")
+                Log.e("CallLobby", "SMS sending failed", error)
+            }
         }
     }
-
     protected suspend fun sendOtpSms() {
         if (roomOtp.isBlank() || isOtpSent) return
         isOtpSent = true

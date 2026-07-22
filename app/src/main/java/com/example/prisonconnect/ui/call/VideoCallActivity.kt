@@ -25,6 +25,7 @@ class VideoCallActivity : BaseCallActivity<ActivityVideoCallBinding>() {
         binding.tvVideoName.text = inmateName
 
         binding.btnVideoHangup.setOnClickListener { confirmExit() }
+        binding.btnCancelCall.setOnClickListener{ confirmExit() }
         binding.btnVideoMic.setOnClickListener { toggleMic() }
         binding.btnVideoSwitch.setOnClickListener { webRtcManager.switchCamera() }
 

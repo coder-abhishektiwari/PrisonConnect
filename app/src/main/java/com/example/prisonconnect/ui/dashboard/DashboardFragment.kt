@@ -30,6 +30,11 @@ import kotlinx.coroutines.launch
 import android.widget.ArrayAdapter
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.example.prisonconnect.databinding.DialogDialerBinding
+import com.example.prisonconnect.databinding.DialogSmsProviderSelectorBinding
+import com.example.prisonconnect.config.SmsConfig
+import com.example.prisonconnect.config.SmsMode
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import androidx.core.content.ContextCompat
 
 class DashboardFragment : Fragment() {
 
@@ -68,6 +73,10 @@ class DashboardFragment : Fragment() {
 
         binding.fabDialer.setOnClickListener {
             showDialerDialog()
+        }
+
+        binding.btnToggleMessaging.setOnClickListener {
+            showSmsProviderSelector()
         }
     }
 
@@ -157,28 +166,48 @@ class DashboardFragment : Fragment() {
         val dialog = BottomSheetDialog(requireContext())
         val dialogBinding = DialogDialerBinding.inflate(layoutInflater)
         dialog.setContentView(dialogBinding.root)
+        // ... (rest of the existing dialer code)
+    }
 
-        val codes = listOf("+91", "+1", "+44", "+971", "+966")
-        val adapter = ArrayAdapter(requireContext(), R.layout.dropdown_item, codes)
-        dialogBinding.actCountryCode.setAdapter(adapter)
+    private fun showSmsProviderSelector() {
+        val dialogView = DialogSmsProviderSelectorBinding.inflate(layoutInflater)
+        val dialog = MaterialAlertDialogBuilder(requireContext(), R.style.Theme_PrisonConnect_Dialog)
+            .setView(dialogView.root)
+            .create()
 
-        dialogBinding.btnAudioCall.setOnClickListener {
-            val phone = dialogBinding.etPhoneNumber.text?.toString()
-            val code = dialogBinding.actCountryCode.text.toString()
-            if (validatePhone(phone)) {
-                dialog.dismiss()
-                launchCall("$code$phone", "AUDIO")
-            }
+        val sharedPref = requireActivity().getSharedPreferences("PrisonPrefs", Context.MODE_PRIVATE)
+        val savedMode = sharedPref.getString("active_sms_provider", SmsConfig.SMS_MODE.name)
+        var selectedMode = try { SmsMode.valueOf(savedMode ?: "") } catch(e: Exception) { SmsConfig.SMS_MODE }
+
+        fun updateUi() {
+            val highlightColor = ContextCompat.getColor(requireContext(), R.color.primary)
+            val normalColor = android.graphics.Color.TRANSPARENT
+            
+            dialogView.cardTwilio.strokeColor = if (selectedMode == SmsMode.TWILIO) highlightColor else normalColor
+            dialogView.cardDevice.strokeColor = if (selectedMode == SmsMode.DEVICE) highlightColor else normalColor
+            
+            dialogView.cardTwilio.alpha = if (selectedMode == SmsMode.TWILIO) 1.0f else 0.6f
+            dialogView.cardDevice.alpha = if (selectedMode == SmsMode.DEVICE) 1.0f else 0.6f
         }
 
-        dialogBinding.btnVideoCall.setOnClickListener {
-            val phone = dialogBinding.etPhoneNumber.text?.toString()
-            val code = dialogBinding.actCountryCode.text.toString()
-            if (validatePhone(phone)) {
-                dialog.dismiss()
-                launchCall("$code$phone", "VIDEO")
-            }
+        updateUi()
+
+        dialogView.cardTwilio.setOnClickListener {
+            selectedMode = SmsMode.TWILIO
+            updateUi()
         }
+
+        dialogView.cardDevice.setOnClickListener {
+            selectedMode = SmsMode.DEVICE
+            updateUi()
+        }
+
+        dialogView.btnSave.setOnClickListener {
+            sharedPref.edit().putString("active_sms_provider", selectedMode.name).apply()
+            Toast.makeText(context, "SMS provider updated to $selectedMode", Toast.LENGTH_SHORT).show()
+            dialog.dismiss()
+        }
+
         dialog.show()
     }
 

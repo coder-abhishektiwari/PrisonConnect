@@ -37,11 +37,4 @@ class SmsController(context: Context) {
             }
         }
 
-    /**
-     * No-op kept for backward compatibility.
-     * Receivers are no longer registered locally since SMS is routed via Supabase/Demo.
-     */
-    fun unregisterReceivers() {
-        // No-op: SMS is sent via Supabase Edge Function or Demo logger
-    }
 }
