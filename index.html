@@ -298,10 +298,7 @@
     }
 
     #remoteVideo {
-      position: absolute;
-      inset: 0;
-      z-index: 1;
-      object-fit: contain;
+      position: absolute; inset: 0; z-index: 1; object-fit: contain; background-color: #000; 
     }
 
     #localVideo {
@@ -660,8 +657,7 @@
     <!-- SCREEN Call -->
     <section id="screen-call" class="screen">
       <!-- Persistent Remote Video/Audio outside of toggleable wrappers -->
-      <video id="remoteVideo" autoplay playsinline
-        style="position:absolute; inset:0; z-index: 1; width:100%; height:100%; object-fit:cover; background:#000;"></video>
+      <video id="remoteVideo" autoplay playsinline></video>
 
       <div class="video-wrap" id="videoLayout">
         <video id="localVideo" autoplay playsinline muted></video>
