@@ -1,3 +1,11 @@
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/8ad1b7f4-ec5e-4df6-9b17-89f6b3dcba49"
+       alt="Image"
+       width="512" />
+  <br>
+  <em>PrisonConnect Logo</em>
+</p>
+
 # PrisonConnect: Demo Implementation Report
 
 ## 1. Project Overview
@@ -37,22 +45,17 @@ The demo relies on a modern, serverless architecture to ensure rapid deployment 
 - **Storage (Bucket)**:
     - `recordings`: Secure bucket where MP4 call recordings are uploaded automatically after each session.
 
-### C. The Flow
-```mermaid
-graph TD
-    A[Android Kiosk] -- Signaling --> B[Supabase Realtime]
-    B -- Signaling --> C[Family Browser]
-    A -- Media --> D[STUN/TURN Servers]
-    C -- Media --> D
-    A -- Record --> E[Local MP4]
-    E -- Upload --> F[Supabase Storage]
-    A -- Trigger --> G[Edge Function]
-    G -- SMS --> H[Twilio API]
-```
+### C. Archetectural Flow of the system
 
+
+<p align="center">
+    <img width="1683" height="935" alt="Image" src="https://github.com/user-attachments/assets/eeb2e08c-66fa-44c4-a915-44e6d512000a" />
+  <br>
+  <em>This is the archetectural flow of the system</em>
+</p>
 ---
 
-## 4. How to Use the Demo
+## 4. User Flow Demo
 
 ### Step 1: Inmate Login
 Open the Android app and log in using the inmate PIN. This retrieves the profile and balance from the `users` table.
@@ -74,6 +77,13 @@ Once verified, the browser requests Camera/Mic access. The call connects automat
 ### Step 6: Termination & Upload
 When either side hangs up, the Kiosk stops the recording, updates the inmate's final balance in the DB, and uploads the MP4 file to Supabase Storage. The browser automatically redirects to a blank page for security.
 
+<img width="1812" height="868" alt="Image" src="https://github.com/user-attachments/assets/e65dc24d-22ec-4dfe-a1c6-ce9e85128228" />
+
+<p align="center">
+  <img width="1812" height="868" alt="Image" src="https://github.com/user-attachments/assets/e65dc24d-22ec-4dfe-a1c6-ce9e85128228" />
+  <br>
+  <em>User Flow in the app</em>
+</p>
 ---
 
 ## 5. Engineering Challenges & Solutions
