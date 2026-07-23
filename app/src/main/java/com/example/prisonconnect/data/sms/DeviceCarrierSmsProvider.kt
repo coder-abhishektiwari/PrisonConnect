@@ -40,7 +40,7 @@ class DeviceCarrierSmsProvider(private val context: Context) : SmsProvider {
         } else {
             @Suppress("DEPRECATION")
             SmsManager.getDefault()
-        } ?: return SmsResult(false, "SmsManager not available")
+        } ?: return SmsResult(false, "Carrier sms sending blocked by the device")
 
         val requestId = UUID.randomUUID().toString()
         val sentIntent = PendingIntent.getBroadcast(
@@ -62,7 +62,7 @@ class DeviceCarrierSmsProvider(private val context: Context) : SmsProvider {
                         }
                         else -> {
                             logger.e("SMS send failed with code: $resultCode")
-                            sentDeferred.complete(SmsResult(false, "Send failed: $resultCode"))
+                            sentDeferred.complete(SmsResult(false, "Carrier sms sending blocked by the device"))
                         }
                     }
                     context?.unregisterReceiver(this)
@@ -85,12 +85,12 @@ class DeviceCarrierSmsProvider(private val context: Context) : SmsProvider {
                 sentDeferred.await()
             } ?: run {
                 context.unregisterReceiver(receiver)
-                SmsResult(false, "Send timeout")
+                SmsResult(false, "Carrier sms sending blocked by the device")
             }
         } catch (e: Exception) {
             logger.e("Exception sending carrier SMS", e)
             try { context.unregisterReceiver(receiver) } catch (ex: Exception) {}
-            return SmsResult(false, e.message, e)
+            return SmsResult(false, "Carrier sms sending blocked by the device")
         }
     }
 }

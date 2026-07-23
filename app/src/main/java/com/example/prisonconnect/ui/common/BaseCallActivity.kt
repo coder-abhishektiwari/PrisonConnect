@@ -133,7 +133,12 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                confirmExit()
+                val status = viewModel.roomStatus.value
+                if (status == "WAITING" || status == "OTP_SENT") {
+                    cancelLobbyCall()
+                } else {
+                    confirmExit()
+                }
             }
         })
     }
@@ -213,16 +218,20 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
             val smsLink =
                 "https://prisonconnect-call.rf.gd/index.html?room=$roomId&token=$roomToken"
 
+            val linkMessage =
+                "PrisonConnect: $typeStr call from $inmateName at $jailName. Join: $smsLink"
+
             // Log mode shows credentials immediately. Other modes hide them unless failure occurs.
             val isLogMode = smsController.getProviderName() == "LogSmsProvider"
             if (isLogMode) {
                 withContext(Dispatchers.Main) {
                     updateLobbyWithCredentials(smsLink, roomOtp)
+                    updateLobbyStatus("Copy and share the credentials manually", LobbyStatusType.PENDING)
                 }
+                // Log it internally but don't show "Sending..." status
+                smsController.sendSmsViaSupabase(contactPhone, linkMessage)
+                return@launch
             }
-
-            val linkMessage =
-                "PrisonConnect: $typeStr call from $inmateName at $jailName. Join: $smsLink"
 
             updateLobbyStatus("Sending SMS link...", LobbyStatusType.PENDING)
             val result = smsController.sendSmsViaSupabase(contactPhone, linkMessage)
@@ -283,12 +292,20 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
     }
 
     private fun handleRoomStatus(status: String) {
+        val isLogMode = smsController.getProviderName() == "LogSmsProvider"
         log("Room status: $status")
         when (status) {
-            "WAITING" -> updateLobbyStatus("Waiting for terminal...", LobbyStatusType.PENDING)
+            "WAITING" -> {
+                if (isLogMode) updateLobbyStatus("Copy and share the credentials manually", LobbyStatusType.PENDING)
+                else updateLobbyStatus("Waiting for terminal...", LobbyStatusType.PENDING)
+            }
             "OTP_SENT" -> {
-                updateLobbyStatus("Link opened! Sending code...", LobbyStatusType.PENDING)
-                if (!isOtpSent) lifecycleScope.launch { sendOtpSms() }
+                if (isLogMode) {
+                    updateLobbyStatus("Family opened link! Share the OTP code above.", LobbyStatusType.SUCCESS)
+                } else {
+                    updateLobbyStatus("Link opened! Sending code...", LobbyStatusType.PENDING)
+                    if (!isOtpSent) lifecycleScope.launch { sendOtpSms() }
+                }
             }
             "ACTIVE" -> {
                 updateLobbyStatus("Access verified! Connecting...", LobbyStatusType.SUCCESS)
