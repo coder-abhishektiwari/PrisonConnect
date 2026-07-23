@@ -89,12 +89,26 @@ class SecureHardwareRecordingService : Service(),
 
     private fun startForegroundWithType() {
         val notification = createNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            startForeground(NOTIFICATION_ID, notification, serviceType)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                startForeground(NOTIFICATION_ID, notification, serviceType)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            // FIX (Issue 13): On Android 14+ (API 34), the OS enforces that the manifest declares
+            // the foregroundServiceType AND that the app holds matching runtime permissions at the
+            // moment startForeground() is called, or it throws ForegroundServiceStartNotAllowedException
+            // / SecurityException. Wrap in try/catch to fail gracefully rather than crashing the service.
+            Log.e(TAG, "Failed to start foreground service", e)
+            // Fall back: try without type (audio-only may still work)
+            try {
+                startForeground(NOTIFICATION_ID, notification)
+            } catch (e2: Exception) {
+                Log.e(TAG, "Failed to start foreground even without type", e2)
+            }
         }
     }
 
@@ -130,7 +144,10 @@ class SecureHardwareRecordingService : Service(),
         val file = File(cacheDir, sanitizedFileName)
         localFile = file
 
-        recorder = WebRtcRecorder(file)
+        recorder = WebRtcRecorder(file, onError = { error ->
+            Log.e(TAG, "FATAL RECORDER ERROR: $error")
+            handleTamperDetected() // Kill the call if recording fails
+        })
         recorder?.start(hasVideo = isVideoCall)
     }
 
@@ -184,7 +201,7 @@ class SecureHardwareRecordingService : Service(),
                         "call_rooms",
                         "room_id",
                         id,
-                        mapOf("room_status" to "TAMPER_KILLED")
+                        mapOf("room_status" to "DISCONNECTED")
                     )
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to update tamper status", e)
@@ -199,9 +216,27 @@ class SecureHardwareRecordingService : Service(),
     fun stopAndUpload() {
         Log.d(TAG, "Stopping recording and initiating upload...")
         isRecording = false
-        recorder?.stop()
+        
+        val currentRecorder = recorder
+        val muxerWasStarted = currentRecorder?.isMuxerStarted == true
+        
+        currentRecorder?.stop()
 
         val file = localFile ?: run {
+            stopSelf()
+            return
+        }
+
+        // Integrity check: at least 1KB for a valid MP4 and muxer must have started
+        val fileIsValid = file.exists() && file.length() > 1024
+
+        if (!muxerWasStarted || !fileIsValid) {
+            Log.w(TAG, "Recording file is invalid or muxer never started (muxerStarted=$muxerWasStarted, size=${file.length()}). " +
+                    "Marking as DISCONNECTED (empty) instead of uploading.")
+            
+            // Clean up the invalid file
+            if (file.exists()) file.delete()
+            stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return
         }
@@ -236,10 +271,11 @@ class SecureHardwareRecordingService : Service(),
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        isRecording = false
-        recorder?.stop()
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        // FIX (Issue 14): If the app/task is killed mid-call, attempt to upload the recording
+        // instead of just discarding it. stopAndUpload() will handle the upload asynchronously
+        // and call stopSelf() in its finally block.
+        Log.w(TAG, "Task removed — attempting to upload in-progress recording")
+        stopAndUpload()
     }
 
     override fun onDestroy() {

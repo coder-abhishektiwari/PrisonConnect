@@ -4,6 +4,10 @@ import android.media.*
 import android.os.Handler
 import android.os.HandlerThread
 import com.example.prisonconnect.util.Logger
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.webrtc.VideoFrame
 import org.webrtc.VideoSink
 import org.webrtc.audio.JavaAudioDeviceModule
@@ -21,7 +25,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 class WebRtcRecorder(
     private val outputFile: File,
     private val videoWidth: Int = 1280,
-    private val videoHeight: Int = 720
+    private val videoHeight: Int = 720,
+    private val onError: ((String) -> Unit)? = null
 ) : VideoSink {
 
     private val logger = Logger("WebRtcRecorder")
@@ -43,11 +48,28 @@ class WebRtcRecorder(
     private var videoHandler: Handler? = null
     
     private var startTimeNs: Long = -1
+    private var lastAudioTimestampUs: Long = -1
+    private var lastVideoTimestampUs: Long = -1
+    private val timestampLock = Object()
+
+    private fun getRelativeTimestampUs(): Long {
+        synchronized(timestampLock) {
+            if (startTimeNs == -1L) {
+                startTimeNs = System.nanoTime()
+                return 0
+            }
+            return (System.nanoTime() - startTimeNs) / 1000
+        }
+    }
 
     // Audio mixing buffers
     private var lastLocalSamples: ByteArray? = null
     private var lastRemoteSamples: ByteArray? = null
     private val audioLock = Object()
+
+    // Packet buffering to prevent startup loss
+    private val pendingPackets = mutableListOf<PendingPacket>()
+    private data class PendingPacket(val trackIndex: Int, val buffer: ByteBuffer, val info: MediaCodec.BufferInfo)
 
     companion object {
         private const val AUDIO_MIME_TYPE = "audio/mp4a-latm"
@@ -58,6 +80,9 @@ class WebRtcRecorder(
         private const val VIDEO_BIT_RATE = 2000000
         private const val VIDEO_FRAME_RATE = 30
         private const val VIDEO_I_FRAME_INTERVAL = 2
+        // FIX (Issue 10): If hasVideo but no video track format arrives within this time,
+        // fall back to audio-only muxing to prevent entire recording from being lost.
+        private const val VIDEO_FORMAT_TIMEOUT_MS = 5000L
     }
 
     private var hasVideo: Boolean = true
@@ -116,9 +141,13 @@ class WebRtcRecorder(
         if (!isStarted.get()) return
         val data = samples.data.copyOf() // Copy to avoid threading issues
         audioHandler?.post {
-            synchronized(audioLock) {
-                lastLocalSamples = data
-                mixAndSendAudio()
+            try {
+                synchronized(audioLock) {
+                    lastLocalSamples = data
+                    mixAndSendAudio()
+                }
+            } catch (e: Exception) {
+                logger.e("Error in onLocalAudioSamples handler", e)
             }
         }
     }
@@ -130,9 +159,13 @@ class WebRtcRecorder(
         if (!isStarted.get()) return
         val data = samples.data.copyOf() // Copy to avoid threading issues
         audioHandler?.post {
-            synchronized(audioLock) {
-                lastRemoteSamples = data
-                mixAndSendAudio()
+            try {
+                synchronized(audioLock) {
+                    lastRemoteSamples = data
+                    mixAndSendAudio()
+                }
+            } catch (e: Exception) {
+                logger.e("Error in onRemoteAudioSamples handler", e)
             }
         }
     }
@@ -141,36 +174,52 @@ class WebRtcRecorder(
         val local = lastLocalSamples
         val remote = lastRemoteSamples
         
-        // We only need ONE side to be ready to start recording
-        // If the other side is missing, we fill with silence
         if (local != null || remote != null) {
-            val size = local?.size ?: remote?.size ?: return
-            val mixed = ByteArray(size)
-            
-            for (i in 0 until size step 2) {
-                if (i + 1 < size) {
-                    val s1 = if (local != null) {
-                        ((local[i + 1].toInt() shl 8) or (local[i].toInt() and 0xFF)).toShort()
-                    } else 0.toShort()
-                    
-                    val s2 = if (remote != null) {
-                        ((remote[i + 1].toInt() shl 8) or (remote[i].toInt() and 0xFF)).toShort()
-                    } else 0.toShort()
-                    
-                    val mixedSample = ((s1 + s2) / 2).toShort()
-                    mixed[i] = (mixedSample.toInt() and 0xFF).toByte()
-                    mixed[i + 1] = ((mixedSample.toInt() shr 8) and 0xFF).toByte()
-                }
+            val size = if (local != null && remote != null) {
+                minOf(local.size, remote.size)
+            } else {
+                local?.size ?: remote?.size ?: 0
             }
-            encodeAudio(mixed)
             
-            // Clear only what we used
+            if (size <= 0) return
+
+            try {
+                val mixed = ByteArray(size)
+                
+                for (i in 0 until size step 2) {
+                    if (i + 1 < size) {
+                        val s1 = if (local != null) {
+                            ((local[i + 1].toInt() shl 8) or (local[i].toInt() and 0xFF)).toShort()
+                        } else 0.toShort()
+                        
+                        val s2 = if (remote != null) {
+                            ((remote[i + 1].toInt() shl 8) or (remote[i].toInt() and 0xFF)).toShort()
+                        } else 0.toShort()
+                        
+                        // Intelligent Mixing: 
+                        // If both present, average. If only one present, keep full volume.
+                        val mixedSample = if (local != null && remote != null) {
+                            ((s1 + s2) / 2).toShort()
+                        } else {
+                            (s1 + s2).toShort()
+                        }
+                        
+                        mixed[i] = (mixedSample.toInt() and 0xFF).toByte()
+                        mixed[i + 1] = ((mixedSample.toInt() shr 8) and 0xFF).toByte()
+                    }
+                }
+                encodeAudio(mixed)
+            } catch (e: Exception) {
+                logger.e("Error mixing audio samples", e)
+            }
+            
             if (local != null) lastLocalSamples = null
             if (remote != null) lastRemoteSamples = null
         }
     }
 
     private fun encodeAudio(data: ByteArray) {
+        if (!isStarted.get()) return
         val encoder = audioEncoder ?: return
         try {
             val inputBufferIndex = encoder.dequeueInputBuffer(10000)
@@ -178,12 +227,23 @@ class WebRtcRecorder(
                 val inputBuffer = encoder.getInputBuffer(inputBufferIndex)
                 inputBuffer?.clear()
                 inputBuffer?.put(data)
-                val presentationTimeUs = (System.nanoTime() - startTimeNs) / 1000
-                encoder.queueInputBuffer(inputBufferIndex, 0, data.size, presentationTimeUs, 0)
+                
+                var pts = getRelativeTimestampUs()
+                synchronized(timestampLock) {
+                    if (pts <= lastAudioTimestampUs) {
+                        pts = lastAudioTimestampUs + 1 // Ensure strict monotonicity
+                    }
+                    lastAudioTimestampUs = pts
+                }
+                
+                encoder.queueInputBuffer(inputBufferIndex, 0, data.size, pts, 0)
             }
             drainEncoder(encoder, true)
         } catch (e: Exception) {
-            logger.e("Audio encoding error", e)
+            if (isStarted.get()) {
+                logger.e("Audio encoding error", e)
+                onError?.invoke("Audio encoding failed: ${e.message}")
+            }
         }
     }
 
@@ -201,6 +261,7 @@ class WebRtcRecorder(
     }
 
     private fun processVideoFrame(frame: VideoFrame) {
+        if (!isStarted.get()) return
         val encoder = videoEncoder ?: return
         try {
             val inputBufferIndex = encoder.dequeueInputBuffer(10000)
@@ -208,26 +269,31 @@ class WebRtcRecorder(
                 val inputBuffer = encoder.getInputBuffer(inputBufferIndex) ?: return
                 inputBuffer.clear()
                 
-                // Convert to I420 and copy to buffer
                 val i420 = frame.buffer.toI420() ?: return
-                
                 try {
-                    // Note: This assumes the MediaCodec input buffer is large enough
-                    // and expects a packed I420 format (YYYY...UU...VV...)
-                    
                     copyPlane(i420.dataY, i420.strideY, i420.width, i420.height, inputBuffer)
                     copyPlane(i420.dataU, i420.strideU, i420.width / 2, i420.height / 2, inputBuffer)
                     copyPlane(i420.dataV, i420.strideV, i420.width / 2, i420.height / 2, inputBuffer)
                     
-                    val presentationTimeUs = (System.nanoTime() - startTimeNs) / 1000
-                    encoder.queueInputBuffer(inputBufferIndex, 0, inputBuffer.position(), presentationTimeUs, 0)
+                    var pts = getRelativeTimestampUs()
+                    synchronized(timestampLock) {
+                        if (pts <= lastVideoTimestampUs) {
+                            pts = lastVideoTimestampUs + 1
+                        }
+                        lastVideoTimestampUs = pts
+                    }
+                    
+                    encoder.queueInputBuffer(inputBufferIndex, 0, inputBuffer.position(), pts, 0)
                 } finally {
                     i420.release()
                 }
             }
             drainEncoder(encoder, false)
         } catch (e: Exception) {
-            logger.e("Video encoding error", e)
+            if (isStarted.get()) {
+                logger.e("Video encoding error", e)
+                onError?.invoke("Video encoding failed: ${e.message}")
+            }
         }
     }
 
@@ -245,37 +311,77 @@ class WebRtcRecorder(
     }
 
     private fun drainEncoder(encoder: MediaCodec, isAudio: Boolean) {
+        if (!isStarted.get()) return
         val bufferInfo = MediaCodec.BufferInfo()
-        while (true) {
-            val outputBufferIndex = encoder.dequeueOutputBuffer(bufferInfo, 10000)
-            if (outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                break
-            } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                if (isMuxerStarted) throw RuntimeException("Format changed after muxer started")
-                val newFormat = encoder.outputFormat
-                if (isAudio) audioTrackIndex = muxer!!.addTrack(newFormat)
-                else videoTrackIndex = muxer!!.addTrack(newFormat)
-                
-                val readyToStart = if (hasVideo) {
-                    audioTrackIndex != -1 && videoTrackIndex != -1
-                } else {
-                    audioTrackIndex != -1
-                }
+        try {
+            while (isStarted.get()) {
+                val outputBufferIndex = encoder.dequeueOutputBuffer(bufferInfo, 10000)
+                if (outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                    break
+                } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    val newFormat = encoder.outputFormat
+                    synchronized(timestampLock) {
+                        if (isAudio) audioTrackIndex = muxer!!.addTrack(newFormat)
+                        else videoTrackIndex = muxer!!.addTrack(newFormat)
 
-                if (readyToStart) {
-                    muxer?.start()
-                    _isMuxerStarted.set(true)
-                    logger.d("Muxer started (hasVideo=$hasVideo)")
-                }
-            } else if (outputBufferIndex >= 0) {
-                val outputBuffer = encoder.getOutputBuffer(outputBufferIndex)
-                if (isMuxerStarted && outputBuffer != null) {
-                    val trackIndex = if (isAudio) audioTrackIndex else videoTrackIndex
-                    if (trackIndex != -1) {
-                        muxer?.writeSampleData(trackIndex, outputBuffer, bufferInfo)
+                        val readyToStart = if (hasVideo) {
+                            audioTrackIndex != -1 && videoTrackIndex != -1
+                        } else {
+                            audioTrackIndex != -1
+                        }
+
+                        if (readyToStart && !_isMuxerStarted.get()) {
+                            muxer?.start()
+                            _isMuxerStarted.set(true)
+                            logger.d("Muxer started (hasVideo=$hasVideo). Flushing pending packets.")
+
+                            // Flush buffered packets
+                            synchronized(pendingPackets) {
+                                pendingPackets.forEach { packet ->
+                                    try {
+                                        muxer?.writeSampleData(packet.trackIndex, packet.buffer, packet.info)
+                                    } catch (e: Exception) {
+                                        logger.e("Error flushing pending packet", e)
+                                    }
+                                }
+                                pendingPackets.clear()
+                            }
+                        }
                     }
+                } else if (outputBufferIndex >= 0) {
+                    val outputBuffer = encoder.getOutputBuffer(outputBufferIndex)
+                    if (outputBuffer != null) {
+                        val trackIndex = if (isAudio) audioTrackIndex else videoTrackIndex
+                        if (trackIndex != -1) {
+                            if (_isMuxerStarted.get()) {
+                                try {
+                                    muxer?.writeSampleData(trackIndex, outputBuffer, bufferInfo)
+                                } catch (e: Exception) {
+                                    logger.e("Error writing sample data", e)
+                                }
+                            } else {
+                                // Buffer packets arriving before muxer start
+                                synchronized(pendingPackets) {
+                                    val buffer = ByteBuffer.allocateDirect(bufferInfo.size)
+                                    outputBuffer.position(bufferInfo.offset)
+                                    outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
+                                    buffer.put(outputBuffer)
+                                    buffer.flip()
+
+                                    val infoCopy = MediaCodec.BufferInfo()
+                                    infoCopy.set(0, bufferInfo.size, bufferInfo.presentationTimeUs, bufferInfo.flags)
+                                    pendingPackets.add(PendingPacket(trackIndex, buffer, infoCopy))
+                                }
+                            }
+                        }
+                    }
+                    encoder.releaseOutputBuffer(outputBufferIndex, false)
                 }
-                encoder.releaseOutputBuffer(outputBufferIndex, false)
+            }
+        } catch (e: Exception) {
+            if (isStarted.get()) {
+                logger.e("Error draining encoder", e)
+                onError?.invoke("Encoder drain failed: ${e.message}")
             }
         }
     }
@@ -309,6 +415,7 @@ class WebRtcRecorder(
             videoEncoder = null
             muxer = null
             _isMuxerStarted.set(false)
+            synchronized(pendingPackets) { pendingPackets.clear() }
         }
     }
 

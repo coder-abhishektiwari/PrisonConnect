@@ -64,7 +64,8 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
     protected var isOfferSent = AtomicBoolean(false)
     protected var isEnding = AtomicBoolean(false)
     protected var isRemoteDescriptionSet = false
-    protected var isOfferDeferred = AtomicBoolean(false)
+    protected var isBrowserMediaReady = AtomicBoolean(false)
+    protected var isNegotiating = AtomicBoolean(false)
     protected val remoteCandidatesQueue = mutableListOf<IceCandidate>()
 
     // Services
@@ -306,25 +307,12 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
                 onCallActivated()
             }
             is CallViewModel.SignalingEvent.WebReady -> {
-                val iceState = webRtcManager.currentPeerConnection?.iceConnectionState()
-                log("Web is ready. ICE State: $iceState")
-                
-                val isConnected = iceState == PeerConnection.IceConnectionState.CONNECTED || 
-                                iceState == PeerConnection.IceConnectionState.COMPLETED
-                
-                if (isCallStarted.get()) {
-                    if (isConnected) {
-                        log("Peer already connected, ignoring redundant WebReady")
-                    } else {
-                        if (webRtcManager.isTracksReady) {
-                            log("Peer signaled WebReady, triggering offer")
-                            resetNegotiation()
-                        } else {
-                            log("Peer signaled WebReady but tracks NOT ready. Deferring offer.")
-                            isOfferDeferred.set(true)
-                        }
-                    }
-                }
+                log("Web client has connected to signaling channel.")
+            }
+            is CallViewModel.SignalingEvent.BrowserMediaReady -> {
+                log("Remote browser confirms media tracks are attached.")
+                isBrowserMediaReady.set(true)
+                synchronizedNegotiation()
             }
             is CallViewModel.SignalingEvent.AnswerReceived -> setRemoteDescription(event.sdp, event.type)
             is CallViewModel.SignalingEvent.CandidatesReceived -> handleRemoteCandidates(event.candidates)
@@ -333,6 +321,11 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
     }
 
     private fun resetNegotiation() {
+        if (!isNegotiating.compareAndSet(false, true)) {
+            log("resetNegotiation: Already negotiating, skipping")
+            return
+        }
+
         log("Resetting negotiation for Browser Refresh/Recovery")
         isOfferSent.set(false)
         isRemoteDescriptionSet = false
@@ -352,31 +345,80 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
     private fun createOfferInternal(pc: PeerConnection, iceRestart: Boolean) {
         val constraints = MediaConstraints().apply {
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
-            // Force true for both to ensure metadata is sent even in single-track modes
-            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", if (isVideoMode) "true" else "false"))
             if (iceRestart) {
                 mandatory.add(MediaConstraints.KeyValuePair("IceRestart", "true"))
             }
         }
         pc.createOffer(object : SdpObserver {
             override fun onCreateSuccess(sdp: SessionDescription) {
+                // High-Quality SDP Munging
+                val mungedSdp = if (isVideoMode) {
+                    boostVideoQuality(sdp.description)
+                } else sdp.description
+                
+                val finalSdp = SessionDescription(sdp.type, mungedSdp)
+
                 pc.setLocalDescription(object : SdpObserver {
                     override fun onSetSuccess() {
-                        viewModel.sendOffer(sdp.description, sdp.type.canonicalForm())
+                        viewModel.sendOffer(finalSdp.description, finalSdp.type.canonicalForm())
                         log("Offer sent successfully")
+                        isNegotiating.set(false)
                     }
                     override fun onCreateSuccess(p0: SessionDescription?) {}
-                    override fun onCreateFailure(error: String?) {}
-                    override fun onSetFailure(error: String?) {}
-                }, sdp)
+                    override fun onCreateFailure(error: String?) {
+                        log("Failed to set local description: $error")
+                        isNegotiating.set(false)
+                        isOfferSent.set(false)
+                    }
+                    override fun onSetFailure(error: String?) {
+                        log("Failed to set local description: $error")
+                        isNegotiating.set(false)
+                        isOfferSent.set(false)
+                    }
+                }, finalSdp)
             }
             override fun onSetSuccess() {}
             override fun onCreateFailure(error: String?) {
-                log("Failed to create offer")
+                log("Failed to create offer: $error")
+                isNegotiating.set(false)
                 isOfferSent.set(false)
             }
-            override fun onSetFailure(error: String?) {}
+            override fun onSetFailure(error: String?) {
+                isNegotiating.set(false)
+                isOfferSent.set(false)
+            }
         }, constraints)
+    }
+
+    /**
+     * Injects bandwidth parameters into the SDP to force higher video quality.
+     */
+    private fun boostVideoQuality(sdp: String): String {
+        val lines = sdp.split("\r\n").toMutableList()
+        var videoLineIndex = -1
+        
+        for (i in lines.indices) {
+            if (lines[i].startsWith("m=video")) {
+                videoLineIndex = i
+                break
+            }
+        }
+
+        if (videoLineIndex != -1) {
+            // AS: Application-specific maximum bandwidth (kbps)
+            // TIAS: Transport Independent Application Specific (bps)
+            lines.add(videoLineIndex + 1, "b=AS:2500")
+            lines.add(videoLineIndex + 2, "b=TIAS:2500000")
+            
+            // Add x-google constraints if possible by appending to fmtp lines
+            for (i in lines.indices) {
+                if (lines[i].startsWith("a=fmtp") && (lines[i].contains("VP8") || lines[i].contains("H264"))) {
+                    lines[i] = lines[i] + ";x-google-min-bitrate=1000;x-google-max-bitrate=2500"
+                }
+            }
+        }
+        return lines.joinToString("\r\n")
     }
 
     private fun setRemoteDescription(sdp: String, type: String) {
@@ -527,7 +569,6 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
             unbindService(serviceConnection)
             isServiceBound = false
         }
-        stopService(Intent(this, SecureHardwareRecordingService::class.java))
     }
 
     override fun onIceCandidateGenerated(candidate: IceCandidate) {
@@ -539,6 +580,10 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
         runOnUiThread {
             viewModel.updateRoomStatus("CONNECTED")
             webRtcManager.startStatsMonitoring(lifecycleScope)
+            
+            // Set intelligent defaults for audio output
+            webRtcManager.setSpeakerphoneOn(isVideoMode)
+            
             showCallUi()
         }
     }
@@ -546,21 +591,34 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
     override fun onIceConnectionFailed() {
         log("ICE Connection Failed. Attempting ICE Restart...")
         runOnUiThread {
-            resetNegotiation() // This will trigger a new offer with IceRestart if we add the flag
-            // Actually, let's explicitly call createOffer(true)
-            isOfferSent.set(false)
-            createOffer(iceRestart = true)
+            // FIX: Single path for ICE restart. Reset state and call createOfferInternal(pc, iceRestart = true)
+            val pc = webRtcManager.currentPeerConnection ?: return@runOnUiThread
+            isOfferSent.set(true) // Guard against standard createOffer while restarting
+            isRemoteDescriptionSet = false
+            synchronized(remoteCandidatesQueue) { remoteCandidatesQueue.clear() }
+            createOfferInternal(pc, true)
         }
     }
 
     override fun onLocalTrackReady() {
-        log("Local track is ready.")
-        if (isOfferDeferred.compareAndSet(true, false)) {
-            log("Executing deferred offer now that tracks are ready.")
-            createOffer()
-        } else {
-            // Standard flow: tracks might be ready before WebReady
-            createOffer()
+        log("Local media tracks (Camera/Mic) are attached.")
+        synchronizedNegotiation()
+    }
+
+    /**
+     * Ensures negotiation only starts when BOTH the Kiosk and the Browser are ready.
+     */
+    private fun synchronizedNegotiation() {
+        if (!isCallStarted.get()) return
+        
+        val kioskReady = webRtcManager.isTracksReady
+        val browserReady = isBrowserMediaReady.get()
+        
+        log("Checking synchronization: Kiosk=$kioskReady, Browser=$browserReady")
+        
+        if (kioskReady && browserReady) {
+            log("Handshake COMPLETE. Starting negotiation.")
+            resetNegotiation()
         }
     }
 

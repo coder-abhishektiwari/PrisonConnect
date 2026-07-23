@@ -39,7 +39,7 @@ class SignalingClient(
     private var workerJob: Job? = null
 
     companion object {
-        private const val THROTTLE_DELAY_MS = 200L // 5 messages per second
+        private const val THROTTLE_DELAY_MS = 100L // 10 messages per second (Max Supabase Broadcast capacity)
     }
 
     /**
@@ -54,6 +54,9 @@ class SignalingClient(
 
         /** The remote browser client is ready for WebRTC negotiation. */
         fun onWebReady()
+
+        /** The remote browser has successfully captured media and attached tracks. */
+        fun onBrowserMediaReady()
 
         /** An SDP answer has been received from the remote peer. */
         fun onAnswerReceived(sdp: String, type: String)
@@ -139,6 +142,17 @@ class SignalingClient(
                 }
             } catch (e: Exception) {
                 logger.e("web-ready listener failed", e)
+            }
+        })
+
+        listenerJobs.add(scope.launch {
+            try {
+                channel.broadcastFlow<JsonObject>("browser-media-ready").collect {
+                    logger.d("Broadcast received: browser-media-ready")
+                    listener.onBrowserMediaReady()
+                }
+            } catch (e: Exception) {
+                logger.e("browser-media-ready listener failed", e)
             }
         })
 

@@ -33,17 +33,6 @@ class CallViewModel : BaseCallViewModel(), SignalingClient.SignalingListener {
     private val _signalingEvents = MutableSharedFlow<SignalingEvent>(replay = 1)
     val signalingEvents: SharedFlow<SignalingEvent> = _signalingEvents.asSharedFlow()
 
-    // ICE Candidate Batching
-    private val localCandidatesQueue = mutableListOf<IceCandidate>()
-    private var candidateBatchJob: Job? = null
-
-    companion object {
-        /** Delay in milliseconds before sending a batch of ICE candidates. */
-        private const val CANDIDATE_BATCH_DELAY_MS = 200L
-        /** Maximum candidates per batch before forced send. */
-        private const val MAX_CANDIDATES_PER_BATCH = 5
-    }
-
     /**
      * Events emitted by the signaling client for the UI to process.
      */
@@ -56,6 +45,9 @@ class CallViewModel : BaseCallViewModel(), SignalingClient.SignalingListener {
 
         /** The remote browser is ready for WebRTC negotiation. */
         object WebReady : SignalingEvent()
+
+        /** The remote browser has local media tracks attached and is ready to negotiate. */
+        object BrowserMediaReady : SignalingEvent()
 
         /** An SDP answer has been received from the remote peer. */
         data class AnswerReceived(val sdp: String, val type: String) : SignalingEvent()
@@ -95,6 +87,11 @@ class CallViewModel : BaseCallViewModel(), SignalingClient.SignalingListener {
         viewModelScope.launch { _signalingEvents.emit(SignalingEvent.WebReady) }
     }
 
+    override fun onBrowserMediaReady() {
+        logger.d("Signaling: browser-media-ready")
+        viewModelScope.launch { _signalingEvents.emit(SignalingEvent.BrowserMediaReady) }
+    }
+
     override fun onAnswerReceived(sdp: String, type: String) {
         logger.d("Signaling: answer received")
         viewModelScope.launch {
@@ -126,49 +123,46 @@ class CallViewModel : BaseCallViewModel(), SignalingClient.SignalingListener {
         signalingClient?.sendOffer(sdp, type)
     }
 
+    private val pendingCandidates = mutableListOf<IceCandidate>()
+    private var candidateBatchJob: Job? = null
+
     /**
-     * Queues a local ICE candidate for batched transmission.
-     *
-     * Candidates are accumulated and sent as a batch after [CANDIDATE_BATCH_DELAY_MS]
-     * milliseconds of inactivity, reducing signaling overhead.
+     * Queues a local ICE candidate to be sent in a batch.
+     * Batching reduces message frequency to stay within signaling rate limits.
      *
      * @param candidate The ICE candidate to send
      */
     fun queueLocalCandidate(candidate: IceCandidate) {
-        synchronized(localCandidatesQueue) {
-            localCandidatesQueue.add(candidate)
+        synchronized(pendingCandidates) {
+            pendingCandidates.add(candidate)
         }
 
-        val queueSize = synchronized(localCandidatesQueue) { localCandidatesQueue.size }
-
-        if (queueSize >= MAX_CANDIDATES_PER_BATCH) {
-            candidateBatchJob?.cancel()
-            sendLocalCandidateBatch()
-        } else if (candidateBatchJob?.isActive != true) {
+        if (candidateBatchJob == null || candidateBatchJob?.isActive == false) {
             candidateBatchJob = viewModelScope.launch {
-                delay(CANDIDATE_BATCH_DELAY_MS)
-                sendLocalCandidateBatch()
+                delay(100) // 100ms batching window
+                sendCandidateBatch()
             }
         }
     }
 
-    private fun sendLocalCandidateBatch() {
-        val batch = synchronized(localCandidatesQueue) {
-            val list = localCandidatesQueue.toList()
-            localCandidatesQueue.clear()
+    private fun sendCandidateBatch() {
+        val candidatesToSend = synchronized(pendingCandidates) {
+            val list = pendingCandidates.toList()
+            pendingCandidates.clear()
             list
         }
-        if (batch.isNotEmpty()) {
-            val jsonArray = JsonArray(batch.map {
-                buildJsonObject {
-                    put("sdpMid", it.sdpMid ?: "")
-                    put("sdpMLineIndex", it.sdpMLineIndex)
-                    put("candidate", it.sdp)
-                }
-            })
-            signalingClient?.sendCandidateBatch(jsonArray)
-            logger.d("Sent ICE candidate batch: ${batch.size} candidates")
-        }
+
+        if (candidatesToSend.isEmpty()) return
+
+        val jsonArray = JsonArray(candidatesToSend.map { candidate ->
+            buildJsonObject {
+                put("sdpMid", candidate.sdpMid ?: "")
+                put("sdpMLineIndex", candidate.sdpMLineIndex)
+                put("candidate", candidate.sdp)
+            }
+        })
+        
+        signalingClient?.sendCandidateBatch(jsonArray)
     }
 
     /**

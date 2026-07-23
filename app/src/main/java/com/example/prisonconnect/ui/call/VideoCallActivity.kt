@@ -19,6 +19,7 @@ class VideoCallActivity : BaseCallActivity<ActivityVideoCallBinding>() {
     override val tag = "VideoCallActivity"
     override val isVideoMode = true
     private var isMicEnabled = true
+    private var isSpeakerEnabled = true
 
     override fun inflateBinding() = ActivityVideoCallBinding.inflate(layoutInflater)
 
@@ -28,6 +29,7 @@ class VideoCallActivity : BaseCallActivity<ActivityVideoCallBinding>() {
         binding.btnVideoHangup.setOnClickListener { confirmExit() }
         binding.btnCancelCall.setOnClickListener{ confirmExit() }
         binding.btnVideoMic.setOnClickListener { toggleMic() }
+        binding.btnVideoSpeaker.setOnClickListener { toggleSpeaker() }
         binding.btnVideoSwitch.setOnClickListener { webRtcManager.switchCamera() }
 
         setupOverlayLogic()
@@ -89,8 +91,8 @@ class VideoCallActivity : BaseCallActivity<ActivityVideoCallBinding>() {
     }
 
     private fun toggleMic() {
-        updateMicUI()
         isMicEnabled = !isMicEnabled
+        updateMicUI()
         webRtcManager.setAudioEnabled(isMicEnabled)
     }
 
@@ -98,12 +100,32 @@ class VideoCallActivity : BaseCallActivity<ActivityVideoCallBinding>() {
         binding.btnVideoMic.isActivated = isMicEnabled
         binding.btnVideoMic.alpha = if (isMicEnabled) 1f else 0.6f
 
-        if (!isMicEnabled) {
+        if (isMicEnabled) {
             binding.btnVideoMic.setIconResource(R.drawable.ic_mic)
             binding.btnVideoMic.setIconTintResource(R.color.white)
         } else {
             binding.btnVideoMic.setIconResource(R.drawable.ic_mic_off)
             binding.btnVideoMic.setIconTintResource(R.color.danger)
+        }
+    }
+
+    private fun toggleSpeaker() {
+        isSpeakerEnabled = !isSpeakerEnabled
+        updateSpeakerUI()
+        // Mute/Unmute the remote audio output instead of switching devices
+        webRtcManager.setRemoteAudioEnabled(isSpeakerEnabled)
+    }
+
+    private fun updateSpeakerUI() {
+        binding.btnVideoSpeaker.isActivated = isSpeakerEnabled
+        binding.btnVideoSpeaker.alpha = if (isSpeakerEnabled) 1f else 0.6f
+
+        if (isSpeakerEnabled) {
+            binding.btnVideoSpeaker.setIconResource(R.drawable.ic_speaker)
+            binding.btnVideoSpeaker.setIconTintResource(R.color.white)
+        } else {
+            binding.btnVideoSpeaker.setIconResource(R.drawable.ic_speaker_off)
+            binding.btnVideoSpeaker.setIconTintResource(R.color.danger)
         }
     }
 

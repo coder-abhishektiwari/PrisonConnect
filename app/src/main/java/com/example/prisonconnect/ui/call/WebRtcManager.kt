@@ -1,11 +1,16 @@
 package com.example.prisonconnect.ui.call
 
 import android.content.Context
+import android.media.AudioDeviceInfo
+import android.media.AudioFormat
 import android.media.AudioManager
+import android.media.MediaRecorder
+import android.os.Build
 import com.example.prisonconnect.config.SupabaseConfig
 import com.example.prisonconnect.util.Logger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,6 +45,7 @@ class WebRtcManager(
     private var statsLogger: WebRtcStatsLogger? = null
     private var audioDeviceModule: AudioDeviceModule? = null
     private var isInitialized = false
+    private var isVideoMode: Boolean = false
 
     private val _isReady = MutableStateFlow(false)
     val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
@@ -54,7 +60,7 @@ class WebRtcManager(
         get() = localAudioTrack != null
 
     val isTracksReady: Boolean
-        get() = localVideoTrack != null || localAudioTrack != null
+        get() = if (isVideoMode) localVideoTrack != null && localAudioTrack != null else localAudioTrack != null
 
     companion object {
         private const val ICE_CONNECTION_RECEIVING_TIMEOUT_MS = 3000
@@ -78,7 +84,6 @@ class WebRtcManager(
             _isReady.value = false
             logger.d("Initializing PeerConnectionFactory...")
             
-            // PeerConnectionFactory.initialize must only be called ONCE
             if (!isInitialized) {
                 PeerConnectionFactory.initialize(
                     PeerConnectionFactory.InitializationOptions.builder(context)
@@ -87,14 +92,15 @@ class WebRtcManager(
                 )
             }
 
-            // Clean up existing components if re-initializing with new hooks
             factory?.dispose()
             audioDeviceModule?.release()
 
-            // Create AudioDeviceModule with recording hooks
+            // Improved ADM setup for high-fidelity communication
             val admBuilder = JavaAudioDeviceModule.builder(context)
                 .setUseHardwareAcousticEchoCanceler(true)
                 .setUseHardwareNoiseSuppressor(true)
+                .setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION)
+                .setAudioFormat(AudioFormat.ENCODING_PCM_16BIT)
 
             audioRecordCallback?.let { admBuilder.setSamplesReadyCallback(it) }
             audioTrackCallback?.let { admBuilder.setPlaybackSamplesReadyCallback(it) }
@@ -251,11 +257,21 @@ class WebRtcManager(
     fun startLocalStream(localSink: VideoSink?, isVideo: Boolean) {
         val currentFactory = factory ?: return
 
+        isVideoMode = isVideo
+
+        // Step 1: Set up audio track and attach to PeerConnection
         setupLocalAudio(currentFactory)
 
+        // Step 2: If video mode, set up video track and attach to PeerConnection
         if (isVideo && localSink != null) {
             setupLocalVideo(currentFactory, localSink)
         }
+
+        // Step 3: ALL tracks are now attached to the PeerConnection.
+        // Signal readiness ONCE — this prevents the race where createOffer()
+        // fires before video is attached.
+        logger.d("All local tracks attached. Signaling track readiness.")
+        listener.onLocalTrackReady()
     }
 
     private fun setupLocalAudio(factory: PeerConnectionFactory) {
@@ -272,7 +288,7 @@ class WebRtcManager(
             }
         }
         logger.d("Local audio track initialized and added to peer connection")
-        listener.onLocalTrackReady() // Signal that audio track is attached
+        // NOTE: onLocalTrackReady() is NOT called here — it's called once in startLocalStream()
     }
 
     private fun setupLocalVideo(factory: PeerConnectionFactory, localSink: VideoSink) {
@@ -315,7 +331,7 @@ class WebRtcManager(
             }
         }
         logger.d("Local video track added to stream and peer connection")
-        listener.onLocalTrackReady() // Signal that video track is attached
+        // NOTE: onLocalTrackReady() is NOT called here — it's called once in startLocalStream()
     }
 
 
@@ -375,35 +391,63 @@ class WebRtcManager(
 
     fun setAudioEnabled(enabled: Boolean) {
         localAudioTrack?.setEnabled(enabled)
-        logger.d("Audio enabled: $enabled")
+        logger.d("Local Mic enabled: $enabled")
+    }
+
+    /**
+     * Mutes/Unmutes the sound coming from the remote peer.
+     */
+    fun setRemoteAudioEnabled(enabled: Boolean) {
+        internalPeerConnection?.receivers?.forEach { receiver ->
+            val track = receiver.track()
+            if (track is AudioTrack) {
+                track.setEnabled(enabled)
+                // Also set volume explicitly if supported
+                track.setVolume(if (enabled) 1.0 else 0.0)
+            }
+        }
+        logger.d("Remote Audio (Speaker) enabled: $enabled")
     }
 
     @Suppress("DEPRECATION")
     fun setSpeakerphoneOn(on: Boolean) {
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-        @Suppress("DEPRECATION")
-        audioManager.isSpeakerphoneOn = on
-        logger.d("Speakerphone on: $on")
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val devices = audioManager.availableCommunicationDevices
+            val speakerType = AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+            val targetDevice = if (on) devices.find { it.type == speakerType } else null
+            
+            if (on && targetDevice != null) {
+                audioManager.setCommunicationDevice(targetDevice)
+                logger.d("Modern Audio: Speakerphone activated via CommunicationDevice")
+            } else {
+                audioManager.clearCommunicationDevice()
+                logger.d("Modern Audio: CommunicationDevice cleared (returning to default/earpiece)")
+            }
+        } else {
+            audioManager.isSpeakerphoneOn = on
+            logger.d("Legacy Audio: Speakerphone set to $on")
+        }
+
         if (on) {
             val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
-            audioManager.setStreamVolume(
-                AudioManager.STREAM_VOICE_CALL,
-                maxVolume,
-                0
-            )
+            audioManager.setStreamVolume(AudioManager.STREAM_VOICE_CALL, maxVolume, 0)
         }
-        logger.d(
-            "Speakerphone: $on, Volume: ${
-                audioManager.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
-            }"
-        )
     }
 
     fun cleanup() {
         logger.d("Starting WebRTC cleanup...")
         _isReady.value = false
         stopStatsMonitoring()
+
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        audioManager.mode = AudioManager.MODE_NORMAL
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            audioManager.clearCommunicationDevice()
+        }
+        audioManager.isSpeakerphoneOn = false
 
         try {
             videoCapturer?.stopCapture()
@@ -416,20 +460,29 @@ class WebRtcManager(
         surfaceTextureHelper?.dispose()
         surfaceTextureHelper = null
 
+        // IMPORTANT FIX: Remove tracks from stream before disposing them
+        localStream?.let { stream ->
+            localVideoTrack?.let { track -> 
+                try { stream.removeTrack(track) } catch (_: Exception) {}
+            }
+            localAudioTrack?.let { track -> 
+                try { stream.removeTrack(track) } catch (_: Exception) {}
+            }
+            try { stream.dispose() } catch (_: Exception) {}
+        }
+        localStream = null
+
         localVideoTrack?.setEnabled(false)
-        localVideoTrack?.dispose()
+        try { localVideoTrack?.dispose() } catch (_: Exception) {}
         localVideoTrack = null
 
         localAudioTrack?.setEnabled(false)
-        localAudioTrack?.dispose()
+        try { localAudioTrack?.dispose() } catch (_: Exception) {}
         localAudioTrack = null
 
         internalPeerConnection?.close()
-        internalPeerConnection?.dispose()
+        try { internalPeerConnection?.dispose() } catch (_: Exception) {}
         internalPeerConnection = null
-
-        localStream?.dispose()
-        localStream = null
 
         factory?.dispose()
         factory = null

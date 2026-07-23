@@ -53,7 +53,7 @@ class AudioCallActivity : BaseCallActivity<ActivityAudioCallBinding>() {
     }
 
     override fun onTimerUpdated(seconds: Long) {
-        binding.tvAudioDuration.text = formatSeconds(seconds)
+     binding.tvAudioDuration.text = formatSeconds(seconds)
     }
 
     override fun updateLobbyStatus(message: String) {
@@ -68,6 +68,8 @@ class AudioCallActivity : BaseCallActivity<ActivityAudioCallBinding>() {
                 binding.lobbyContainer.visibility = View.GONE
                 binding.audioCallUi.visibility = View.VISIBLE
                 webRtcManager.setSpeakerphoneOn(isSpeakerEnabled)
+                updateSpeakerUI()
+                updateMicUI()
                 viewModel.startCallTimer()
             }
         }
@@ -94,16 +96,16 @@ class AudioCallActivity : BaseCallActivity<ActivityAudioCallBinding>() {
 //    }
 
     private fun toggleMic() {
-        updateMicUI()
         isMicEnabled = !isMicEnabled
         webRtcManager.setAudioEnabled(isMicEnabled)
+        updateMicUI()
     }
 
     private fun updateMicUI() {
         binding.btnAudioMic.isActivated = isMicEnabled
         binding.btnAudioMic.alpha = if (isMicEnabled) 1f else 0.6f
 
-        if (!isMicEnabled) {
+        if (isMicEnabled) {
             binding.btnAudioMic.setIconResource(R.drawable.ic_mic)
             binding.btnAudioMic.setIconTintResource(R.color.white)
         } else {
@@ -114,20 +116,28 @@ class AudioCallActivity : BaseCallActivity<ActivityAudioCallBinding>() {
 
     private fun toggleSpeaker() {
         isSpeakerEnabled = !isSpeakerEnabled
+        webRtcManager.setSpeakerphoneOn(isSpeakerEnabled)
+        updateSpeakerUI()
+    }
 
+    private fun updateSpeakerUI() {
         binding.btnAudioSpeaker.isActivated = isSpeakerEnabled
         binding.btnAudioSpeaker.alpha = if (isSpeakerEnabled) 1f else 0.6f
 
-        if (isSpeakerEnabled) {
-            binding.btnAudioSpeaker.setIconTintResource(R.color.primary)
-        } else {
-            binding.btnAudioSpeaker.setIconTintResource(R.color.white)
-        }
-        webRtcManager.setSpeakerphoneOn(isSpeakerEnabled)
+        binding.btnAudioSpeaker.setIconTintResource(
+            if (isSpeakerEnabled) R.color.primary else R.color.white
+        )
     }
 
     private fun showCallInfoTooltip() {
-        val info = "Name: $contactName\nNumber: $contactPhone"
+        val duration = formatSeconds(viewModel.elapsedSeconds.value)
+        val balance = formatDuration(viewModel.remainingBalance.value)
+
+        val info = "Name: $contactName\n" +
+                "Number: $contactPhone\n" +
+                "Duration: $duration\n" +
+                "Balance: $balance"
+
         MaterialAlertDialogBuilder(this)
             .setTitle("Call Details")
             .setMessage(info)

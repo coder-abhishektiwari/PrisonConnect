@@ -204,6 +204,11 @@
           position:fixed; inset:0; background:rgba(0,0,0,0.8);
           display:none; align-items:center; justify-content:center; z-index:100; padding:20px;
         }
+        #endingOverlay{
+          position:fixed; inset:0; background:var(--ink);
+          display:none; flex-direction:column; align-items:center; justify-content:center;
+          z-index:200; text-align:center; gap:20px;
+        }
         .dialog-card{
           background:var(--panel-raised); border-radius:24px; padding:24px;
           width:100%; max-width:320px; border:1px solid var(--line);
@@ -281,8 +286,6 @@
             <video id="remoteVideo" autoplay playsinline></video>
             <video id="localVideo" autoplay playsinline muted></video>
 
-            <div class="rec-pill"><span class="rec-dot"></span> Recorded</div>
-
             <div class="video-header" id="videoHeader">
                 <div class="name" id="videoName">Inmate Name</div>
                 <div class="timer" id="videoTimer">00:00:00</div>
@@ -348,6 +351,12 @@
     </div>
 </div>
 
+<div id="endingOverlay">
+    <div class="spinner"></div>
+    <h1 style="color:var(--text);">Ending call...</h1>
+    <p class="sub" style="color:var(--amber);">Do not close the tab or browser.</p>
+</div>
+
 <script>
     /* ======================================================================
         1. SUPABASE INITIALIZATION & CONFIG
@@ -358,7 +367,11 @@
 
 
 
-    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: {
+            persistSession: false
+        }
+    });
 
     const params = new URLSearchParams(location.search);
     let roomId = params.get('room') || '';
@@ -482,9 +495,12 @@
         document.getElementById('verifyBtn').disabled = true;
         log('Verifying code...');
 
-        // Interaction-based unmute for audio/video playback
+        // IMPORTANT: Unmute remote video upon user interaction to satisfy browser policy
         const remoteVideo = document.getElementById('remoteVideo');
-        if (remoteVideo) remoteVideo.muted = false;
+        if (remoteVideo) {
+            remoteVideo.muted = false;
+            remoteVideo.play().catch(e => console.warn("Initial play failed", e));
+        }
 
         const { data: valid } = await supabaseClient.rpc('verify_room_otp', {
             target_room: roomId,
@@ -510,6 +526,7 @@
         3. WebRTC CORE
        ====================================================================== */
     let peerConnection, localStream, callTimer;
+    const iceCandidateQueue = [];
     let seconds = 0;
     let isMicMuted = false;
     let isSpeakerMuted = false;
@@ -568,20 +585,14 @@
       showScreen('screen-call');
 
       const remoteVideo = document.getElementById('remoteVideo');
-      // Initially muted to bypass autoplay block until interaction completes
-      if (remoteVideo) remoteVideo.muted = true;
+      const remoteStream = new MediaStream();
+      if (remoteVideo) {
+          remoteVideo.srcObject = remoteStream;
+          remoteVideo.muted = true;
+      }
 
       const safeSend = (msg) => {
         try { channel.send(msg); } catch(e) { console.warn("Send failed", e); }
-      };
-
-      const sendCandidateBatch = () => {
-        if (pendingCandidates.length === 0) return;
-        const candidates = [...pendingCandidates];
-        pendingCandidates = [];
-        if (candidateTimer) clearTimeout(candidateTimer);
-        candidateTimer = null;
-        safeSend({ type: 'broadcast', event: 'candidates-batch', payload: { sender: 'web', candidates } });
       };
 
       // Fullscreen/Immersive setup
@@ -596,10 +607,29 @@
       document.getElementById('audioOnlyUI').style.display = isVideo ? 'none' : 'flex';
 
       try {
+        log("Requesting media permissions...");
         localStream = await navigator.mediaDevices.getUserMedia({
-          video: isVideo ? { facingMode: currentFacingMode } : false,
-          audio: true
+          video: isVideo ? {
+              facingMode: currentFacingMode,
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              frameRate: { ideal: 30 }
+          } : false,
+          audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+              sampleRate: 48000
+          }
         });
+
+        // Ensure AudioContext is running to keep the mic active
+        try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            const audioCtx = new AudioContext();
+            const source = audioCtx.createMediaStreamSource(localStream);
+            log("Audio pipeline initialized", "ok");
+        } catch(e) { console.warn("AudioContext failed", e); }
 
         if (isVideo) {
             document.getElementById('localVideo').srcObject = localStream;
@@ -608,69 +638,112 @@
 
         peerConnection = new RTCPeerConnection(rtcConfig);
 
-        // IMPORTANT: Attach local tracks so the phone can see the web media
+        peerConnection.onconnectionstatechange = () => {
+            log("Connection State: " + peerConnection.connectionState,
+                peerConnection.connectionState === 'connected' ? 'ok' : '');
+        };
+
+        peerConnection.oniceconnectionstatechange = () => {
+            log("ICE State: " + peerConnection.iceConnectionState);
+        };
+
         if (localStream) {
             localStream.getTracks().forEach(t => {
-                log("Adding local track to PC: " + t.kind);
+                log("Attaching local track: " + t.kind);
                 peerConnection.addTrack(t, localStream);
             });
         }
 
+        let isWebReadySent = false;
+        const checkReadyToNegotiate = () => {
+            log("All systems ready. Signaling Android.", "ok");
+            safeSend({ type: 'broadcast', event: 'browser-media-ready', payload: { sender: 'web' } });
+        };
+
         peerConnection.ontrack = (e) => {
           log("Remote track received: " + e.track.kind);
-          const remoteVideo = document.getElementById('remoteVideo');
+          remoteStream.addTrack(e.track);
 
-          if (e.streams && e.streams[0]) {
-            remoteVideo.srcObject = e.streams[0];
-          } else {
-            // Robust fallback for tracks without streams
-            if (!remoteVideo.srcObject) {
-              remoteVideo.srcObject = new MediaStream();
-            }
-            remoteVideo.srcObject.addTrack(e.track);
+          // Workaround for Chrome/Edge audio policy
+          if (e.track.kind === 'audio') {
+              const playRemote = () => {
+                  remoteVideo.play().then(() => {
+                      log("Audio playback active", "ok");
+                  }).catch(err => {
+                      log("Audio playback waiting for click", "warn");
+                  });
+              };
+              playRemote();
+              // Add a secondary attempt in case of initial race
+              setTimeout(playRemote, 1000);
           }
 
-          remoteVideo.play().catch(err => {
-              log("Autoplay blocked, waiting for interaction", "warn");
-          });
+          if (remoteVideo) {
+              remoteVideo.play().catch(err => {
+                  log("Playback blocked, will retry on click", "warn");
+              });
+          }
         };
 
         peerConnection.onicecandidate = (e) => {
           if (e.candidate) {
             pendingCandidates.push({
-              candidate: e.candidate.candidate,
-              sdpMid: e.candidate.sdpMid,
-              sdpMLineIndex: e.candidate.sdpMLineIndex
+                candidate: e.candidate.candidate,
+                sdpMid: e.candidate.sdpMid,
+                sdpMLineIndex: e.candidate.sdpMLineIndex
             });
 
-            if (pendingCandidates.length >= 5) {
-              sendCandidateBatch();
-            } else if (!candidateTimer) {
-              candidateTimer = setTimeout(() => sendCandidateBatch(), 200);
+            if (!candidateTimer) {
+                candidateTimer = setTimeout(sendCandidateBatch, 100);
             }
           }
         };
 
-        const iceCandidateQueue = [];
+        // Removed local iceCandidateQueue declaration as it is now global
 
-        // Signaling Handlers
+        // --- SDP Bandwidth Munging ---
+        function setVideoBitrate(sdp) {
+            let munged = sdp.replace(/a=fmtp:(.*) (.*)/g, (match, pt, params) => {
+                if (params.includes("x-google-max-bitrate") || params.includes("x-google-min-bitrate")) {
+                    return match;
+                }
+                return `a=fmtp:${pt} ${params};x-google-min-bitrate=1500;x-google-max-bitrate=4000`;
+            });
+
+            // Add bandwidth limit line (b=AS) right after m=video
+            if (munged.indexOf("m=video") !== -1) {
+                munged = munged.replace(/m=video (.*)\r\n/g, `m=video $1\r\nb=AS:4000\r\nb=TIAS:4000000\r\n`);
+            }
+            return munged;
+        }
+
         channel
           .on('broadcast', { event: 'offer' }, async ({ payload }) => {
             if (payload.sender === 'android') {
               log("Offer received from Kiosk");
-              if (peerConnection.signalingState !== "stable") {
-                log("PeerConnection not stable, ignoring redundant offer", "warn");
-                return;
-              }
-              await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.offer));
-              const answer = await peerConnection.createAnswer();
-              await peerConnection.setLocalDescription(answer);
-              safeSend({ type: 'broadcast', event: 'answer', payload: { sender: 'web', answer } });
 
-              // Flush queued candidates
-              while (iceCandidateQueue.length > 0) {
-                  const c = iceCandidateQueue.shift();
-                  peerConnection.addIceCandidate(new RTCIceCandidate(c)).catch(e => {});
+              if (peerConnection.signalingState !== "stable") {
+                  try { await peerConnection.setLocalDescription({type: "rollback"}); } catch(e){}
+              }
+
+              try {
+                  await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.offer));
+                  const answer = await peerConnection.createAnswer();
+
+                  // Munge answer for high quality
+                  if (isVideo) {
+                      answer.sdp = setVideoBitrate(answer.sdp);
+                  }
+
+                  await peerConnection.setLocalDescription(answer);
+                  safeSend({ type: 'broadcast', event: 'answer', payload: { sender: 'web', answer } });
+
+                  while (iceCandidateQueue.length > 0) {
+                      const c = iceCandidateQueue.shift();
+                      peerConnection.addIceCandidate(new RTCIceCandidate(c)).catch(e => {});
+                  }
+              } catch (err) {
+                  log("SDP Error: " + err.message, "warn");
               }
             }
           })
@@ -689,29 +762,27 @@
           })
           .on('broadcast', { event: 'hangup' }, () => terminateCall())
           .subscribe((status) => {
-             if (status === 'SUBSCRIBED' && !isWebReadySent) {
+             if (status === 'SUBSCRIBED') {
                 isWebReadySent = true;
-                log("Signaling channel ready", "ok");
+                log("Signaling ready", "ok");
                 safeSend({ type: 'broadcast', event: 'web-ready', payload: { sender: 'web' } });
+                checkReadyToNegotiate();
              }
           });
 
-        // Timer Start
         callTimer = setInterval(() => {
           seconds++;
           inmateBalance = Math.max(0, inmateBalance - 1);
           const timeStr = formatTime(seconds);
-          const balStr = `Bal: ${formatTime(inmateBalance)}`;
-
           document.getElementById('videoTimer').textContent = timeStr;
           document.getElementById('audioTimer').textContent = timeStr;
-          document.getElementById('videoBalance').textContent = balStr;
-
+          document.getElementById('videoBalance').textContent = `Bal: ${formatTime(inmateBalance)}`;
           if (inmateBalance <= 0) terminateCall();
         }, 1000);
 
       } catch (err) {
         log('Media Error: ' + err.message, 'warn');
+        alert("Please allow Camera & Mic access to join the call.");
       }
     }
 
@@ -727,9 +798,13 @@
     };
 
     function terminateCall() {
+      // Show ending overlay immediately to prevent closing tab
+      document.getElementById('endingOverlay').style.display = 'flex';
+
       clearInterval(callTimer);
       if (candidateTimer) clearTimeout(candidateTimer);
       pendingCandidates = [];
+      iceCandidateQueue.length = 0; // Clear queue
       isWebReadySent = false;
 
       if (localStream) localStream.getTracks().forEach(t => t.stop());
@@ -739,15 +814,11 @@
         peerConnection.close();
       }
 
-      // Update UI feedback before redirect
-      const timerEls = document.querySelectorAll('.timer, .audio-timer');
-      timerEls.forEach(el => el.textContent = 'Call Ended');
-
       log("Call terminated, redirecting...");
 
       // Full reset and redirect to null/blank as requested
       setTimeout(() => {
-          window.location.href = 'about:blank';
+          window.location.replace('about:blank');
       }, 1500);
     }
 
