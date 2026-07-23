@@ -3,7 +3,7 @@
        alt="app logo"
     width="100" height="100"/>
   <br>
-  <em>PrisonConnect Logo</em>
+  <em>PrisonConnect</em>
 </p>
 
 # PrisonConnect: Demo Implementation Report
@@ -76,8 +76,6 @@ Once verified, the browser requests Camera/Mic access. The call connects automat
 
 ### Step 6: Termination & Upload
 When either side hangs up, the Kiosk stops the recording, updates the inmate's final balance in the DB, and uploads the MP4 file to Supabase Storage. The browser automatically redirects to a blank page for security.
-
-<img width="1812" height="868" alt="Image" src="https://github.com/user-attachments/assets/e65dc24d-22ec-4dfe-a1c6-ce9e85128228" />
 
 <p align="center">
   <img width="1812" height="868" alt="Image" src="https://github.com/user-attachments/assets/e65dc24d-22ec-4dfe-a1c6-ce9e85128228" />
