@@ -1,9 +1,0 @@
-- [ ] Prepare drawables and assets for the new UI
-- [ ] Update `fragment_call_room.xml` with Video and Audio UI containers
-- [ ] Refactor `WebRtcManager.kt` to support Mic/Speaker/Camera toggles
-- [ ] Implement UI logic in `CallRoomFragment.kt`:
-    - [ ] Draggable PIP logic
-    - [ ] Auto-hiding overlays (Fade animation + 3s timer)
-    - [ ] Audio-only UI with info tooltip
-    - [ ] Back button override for immediate hangup
-- [ ] Verify build and integration

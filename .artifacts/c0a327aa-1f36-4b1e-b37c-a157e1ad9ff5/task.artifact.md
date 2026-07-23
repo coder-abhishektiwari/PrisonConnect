@@ -1,4 +1,0 @@
-- [x] Update `AndroidManifest.xml` with `<queries>` for GMS
-- [x] Implement Google Play Services availability check in `LoginFragment.kt`
-- [x] Verify build status
-- [x] Create walkthrough
