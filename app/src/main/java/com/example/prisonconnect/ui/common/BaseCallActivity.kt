@@ -406,15 +406,13 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
         }
 
         if (videoLineIndex != -1) {
-            // AS: Application-specific maximum bandwidth (kbps)
-            // TIAS: Transport Independent Application Specific (bps)
-            lines.add(videoLineIndex + 1, "b=AS:2500")
-            lines.add(videoLineIndex + 2, "b=TIAS:2500000")
+            // Force 4Mbps for crystal clear video
+            lines.add(videoLineIndex + 1, "b=AS:4000")
+            lines.add(videoLineIndex + 2, "b=TIAS:4000000")
             
-            // Add x-google constraints if possible by appending to fmtp lines
             for (i in lines.indices) {
                 if (lines[i].startsWith("a=fmtp") && (lines[i].contains("VP8") || lines[i].contains("H264"))) {
-                    lines[i] = lines[i] + ";x-google-min-bitrate=1000;x-google-max-bitrate=2500"
+                    lines[i] = lines[i] + ";x-google-min-bitrate=1500;x-google-max-bitrate=4000"
                 }
             }
         }

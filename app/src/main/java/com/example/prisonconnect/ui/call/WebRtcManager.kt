@@ -75,6 +75,10 @@ class WebRtcManager(
         audioRecordCallback: JavaAudioDeviceModule.SamplesReadyCallback? = null,
         audioTrackCallback: JavaAudioDeviceModule.PlaybackSamplesReadyCallback? = null
     ) = withContext(Dispatchers.Default) {
+        // Ensure communication mode is set BEFORE hardware initialization
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        
         if (isInitialized && audioRecordCallback == null) {
             logger.d("Already initialized and no recording hooks provided, skipping")
             return@withContext
@@ -416,15 +420,15 @@ class WebRtcManager(
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val devices = audioManager.availableCommunicationDevices
-            val speakerType = AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
-            val targetDevice = if (on) devices.find { it.type == speakerType } else null
+            val targetType = if (on) AudioDeviceInfo.TYPE_BUILTIN_SPEAKER else AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+            val targetDevice = devices.find { it.type == targetType }
             
-            if (on && targetDevice != null) {
+            if (targetDevice != null) {
                 audioManager.setCommunicationDevice(targetDevice)
-                logger.d("Modern Audio: Speakerphone activated via CommunicationDevice")
+                logger.d("Modern Audio: Output set to ${if (on) "Speaker" else "Earpiece"} via CommunicationDevice")
             } else {
                 audioManager.clearCommunicationDevice()
-                logger.d("Modern Audio: CommunicationDevice cleared (returning to default/earpiece)")
+                logger.d("Modern Audio: Target device not found, cleared CommunicationDevice")
             }
         } else {
             audioManager.isSpeakerphoneOn = on

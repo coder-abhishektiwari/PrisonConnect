@@ -128,9 +128,9 @@
 
         /* ---- Screen Call (Unified Wrapper) ---- */
         #screen-call{ padding:0; position:relative; background:#000; overflow:hidden; }
-        .video-wrap{ position:relative; height: 100%; width: 100%; display:flex; flex-direction:column; }
+        .video-wrap{ position:relative; height: 100%; width: 100%; display:flex; flex-direction:column; pointer-events: none; }
+        .video-wrap > * { pointer-events: auto; }
         video{ width:100%; height:100%; object-fit:cover; background:#000; }
-        #remoteVideo{ position:absolute; inset:0; z-index: 1; }
         #localVideo{
           position:absolute; width:110px; height:150px; right:16px; top:80px;
           border-radius:14px; border:2px solid rgba(255,255,255,0.2);
@@ -282,8 +282,10 @@
 
     <!-- SCREEN Call -->
     <section id="screen-call" class="screen">
+        <!-- Persistent Remote Video/Audio outside of toggleable wrappers -->
+        <video id="remoteVideo" autoplay playsinline style="position:absolute; inset:0; z-index: 1; width:100%; height:100%; object-fit:cover; background:#000;"></video>
+
         <div class="video-wrap" id="videoLayout">
-            <video id="remoteVideo" autoplay playsinline></video>
             <video id="localVideo" autoplay playsinline muted></video>
 
             <div class="video-header" id="videoHeader">
@@ -588,7 +590,7 @@
       const remoteStream = new MediaStream();
       if (remoteVideo) {
           remoteVideo.srcObject = remoteStream;
-          remoteVideo.muted = true;
+          // IMPORTANT: Do NOT set muted=true here as it overrides the user interaction unmute from verifyBtn
       }
 
       const safeSend = (msg) => {
