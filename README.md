@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://github.com/user-attachments/assets/8ad1b7f4-ec5e-4df6-9b17-89f6b3dcba49"
-       alt="Image"
-       width="512" />
+       alt="app logo"
+    width="100" height="100"/>
   <br>
   <em>PrisonConnect Logo</em>
 </p>
