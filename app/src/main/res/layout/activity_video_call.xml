@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk-auto"
-    xmlns:app2="http://schemas.android.com/apk/res-auto"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -74,9 +73,9 @@
                 style="@style/Widget.Material3.Button.IconButton"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
-                app2:icon="@drawable/ic_copy_share"
-                app2:iconSize="18dp"
-                app2:iconTint="?attr/colorPrimary" />
+                app:icon="@drawable/ic_copy_share"
+                app:iconSize="18dp"
+                app:iconTint="?attr/colorPrimary" />
 
         </LinearLayout>
 
@@ -106,9 +105,9 @@
                 android:layout_width="40dp"
                 android:layout_height="40dp"
                 android:layout_marginStart="8dp"
-                app2:icon="@drawable/ic_copy_share"
-                app2:iconSize="18dp"
-                app2:iconTint="?attr/colorPrimary" />
+                app:icon="@drawable/ic_copy_share"
+                app:iconSize="18dp"
+                app:iconTint="?attr/colorPrimary" />
 
         </LinearLayout>
 
@@ -120,7 +119,7 @@
             android:layout_marginTop="16dp"
             android:text="Copy Link + OTP"
             android:visibility="gone"
-            app2:icon="@drawable/ic_copy_share" />
+            app:icon="@drawable/ic_copy_share" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_cancel_call"
@@ -157,10 +156,9 @@
             android:layout_height="160dp"
             android:layout_margin="16dp"
             android:background="@android:color/black"
-            app2:layout_constraintEnd_toEndOf="parent"
-            app2:layout_constraintTop_toBottomOf="@+id/video_header"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/video_header"
+            app:layout_constraintBottom_toBottomOf="parent" />
 
         <!-- Header -->
         <LinearLayout
@@ -171,8 +169,6 @@
             android:gravity="center"
             android:orientation="vertical"
             android:padding="12dp"
-            app2:layout_constraintEnd_toEndOf="parent"
-            app2:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent"
@@ -213,21 +209,21 @@
             android:background="@drawable/bg_timer_overlay"
             android:gravity="center"
             android:orientation="horizontal"
-            app2:layout_constraintBottom_toBottomOf="parent"
-            app2:layout_constraintEnd_toEndOf="parent"
-            app2:layout_constraintStart_toStartOf="parent">
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent">
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_video_mic"
                 style="@style/Widget.Material3.Button.IconButton"
                 android:layout_width="56dp"
                 android:layout_height="56dp"
-                app2:icon="@drawable/ic_mic"
+                app:icon="@drawable/ic_mic"
                 android:background="@drawable/bg_control_button"
-                app2:backgroundTint="@null"
-                app2:iconTint="@android:color/white"
-                app2:iconGravity="textStart"
-                app2:iconPadding="0dp"/>
+                app:backgroundTint="@null"
+                app:iconTint="@android:color/white"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"/>
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_video_speaker"
@@ -235,12 +231,12 @@
                 android:layout_width="56dp"
                 android:layout_height="56dp"
                 android:layout_marginStart="12dp"
-                app2:icon="@drawable/ic_speaker"
+                app:icon="@drawable/ic_speaker"
                 android:background="@drawable/bg_control_button"
-                app2:backgroundTint="@null"
-                app2:iconTint="@android:color/white"
-                app2:iconGravity="textStart"
-                app2:iconPadding="0dp"/>
+                app:backgroundTint="@null"
+                app:iconTint="@android:color/white"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"/>
 
             <com.google.android.material.floatingactionbutton.FloatingActionButton
                 android:id="@+id/btn_video_hangup"
@@ -248,22 +244,22 @@
                 android:layout_height="wrap_content"
                 android:layout_marginHorizontal="24dp"
                 android:src="@drawable/ic_call_end_down"
-                app2:backgroundTint="?attr/colorError"
-                app2:elevation="0dp"
-                app2:fabSize="normal"
-                app2:tint="@android:color/white"/>
+                app:backgroundTint="?attr/colorError"
+                app:elevation="0dp"
+                app:fabSize="normal"
+                app:tint="@android:color/white"/>
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_video_switch"
                 style="@style/Widget.Material3.Button.IconButton"
                 android:layout_width="56dp"
                 android:layout_height="56dp"
-                app2:icon="@drawable/ic_camera_switch"
+                app:icon="@drawable/ic_camera_switch"
                 android:background="@drawable/bg_control_button"
-                app2:backgroundTint="@null"
-                app2:iconTint="@android:color/white"
-                app2:iconGravity="textStart"
-                app2:iconPadding="0dp"/>
+                app:backgroundTint="@null"
+                app:iconTint="@android:color/white"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"/>
         </LinearLayout>
 
     </androidx.constraintlayout.widget.ConstraintLayout>

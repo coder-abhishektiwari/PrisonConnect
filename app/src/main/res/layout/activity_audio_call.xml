@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
-
-    xmlns:app2="http://schemas.android.com/apk/res-auto"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -44,8 +43,8 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
             android:indeterminate="true"
-            app2:indicatorColor="?attr/colorPrimary"
-            app2:trackColor="?attr/colorSurfaceVariant" />
+            app:indicatorColor="?attr/colorPrimary"
+            app:trackColor="?attr/colorSurfaceVariant" />
 
         <!-- Link Copy Section -->
         <LinearLayout
@@ -58,7 +57,7 @@
             android:orientation="horizontal"
             android:padding="12dp"
             android:visibility="gone"
-            app2:shapeAppearanceOverlay="@style/ShapeAppearance.Material3.Corner.Medium">
+            app:shapeAppearanceOverlay="@style/ShapeAppearance.Material3.Corner.Medium">
 
             <TextView
                 android:id="@+id/tv_lobby_link"
@@ -75,9 +74,9 @@
                 style="@style/Widget.Material3.Button.IconButton"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
-                app2:icon="@drawable/ic_copy_share"
-                app2:iconSize="18dp"
-                app2:iconTint="?attr/colorPrimary" />
+                app:icon="@drawable/ic_copy_share"
+                app:iconSize="18dp"
+                app:iconTint="?attr/colorPrimary" />
         </LinearLayout>
 
         <!-- OTP Copy Section -->
@@ -91,7 +90,7 @@
             android:orientation="horizontal"
             android:padding="12dp"
             android:visibility="gone"
-            app2:shapeAppearanceOverlay="@style/ShapeAppearance.Material3.Corner.Medium">
+            app:shapeAppearanceOverlay="@style/ShapeAppearance.Material3.Corner.Medium">
 
             <TextView
                 android:id="@+id/tv_lobby_otp"
@@ -107,9 +106,9 @@
                 android:layout_width="40dp"
                 android:layout_height="40dp"
                 android:layout_marginStart="8dp"
-                app2:icon="@drawable/ic_copy_share"
-                app2:iconSize="18dp"
-                app2:iconTint="?attr/colorPrimary" />
+                app:icon="@drawable/ic_copy_share"
+                app:iconSize="18dp"
+                app:iconTint="?attr/colorPrimary" />
         </LinearLayout>
 
         <com.google.android.material.button.MaterialButton
@@ -120,7 +119,7 @@
             android:layout_marginTop="16dp"
             android:text="Copy Link + OTP"
             android:visibility="gone"
-            app2:icon="@drawable/ic_copy_share" />
+            app:icon="@drawable/ic_copy_share" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_cancel_call"
@@ -148,9 +147,9 @@
             android:textColor="?attr/colorOnSurfaceVariant"
             android:textSize="16sp"
             android:layout_marginVertical="20dp"
-            app2:layout_constraintEnd_toEndOf="parent"
-            app2:layout_constraintStart_toStartOf="parent"
-            app2:layout_constraintTop_toTopOf="parent" />
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
 
         <TextView
             android:id="@+id/tv_audio_name"
@@ -161,9 +160,9 @@
             android:textStyle="bold"
             android:layout_marginTop="20dp"
             android:layout_marginBottom="10dp"
-            app2:layout_constraintEnd_toEndOf="parent"
-            app2:layout_constraintStart_toStartOf="parent"
-            app2:layout_constraintTop_toBottomOf="@+id/avatar_container"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/avatar_container"
             tools:text="John Doe" />
 
         <TextView
@@ -172,9 +171,9 @@
             android:layout_height="wrap_content"
             android:textColor="?attr/colorOnSurfaceVariant"
             android:textSize="16sp"
-            app2:layout_constraintEnd_toEndOf="parent"
-            app2:layout_constraintStart_toStartOf="parent"
-            app2:layout_constraintTop_toBottomOf="@+id/tv_audio_name"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/tv_audio_name"
             tools:text="+91 9876543210" />
 
 
@@ -187,9 +186,9 @@
             android:textSize="28sp"
             android:textStyle="bold"
             android:layout_marginVertical="20dp"
-            app2:layout_constraintEnd_toEndOf="parent"
-            app2:layout_constraintStart_toStartOf="parent"
-            app2:layout_constraintTop_toBottomOf="@+id/tv_audio_phone" />
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/tv_audio_phone" />
 
         <FrameLayout
             android:id="@+id/avatar_container"
@@ -197,9 +196,9 @@
             android:layout_height="180dp"
             android:background="@drawable/bg_avatar_connected"
             android:layout_marginTop="20dp"
-            app2:layout_constraintEnd_toEndOf="parent"
-            app2:layout_constraintStart_toStartOf="parent"
-            app2:layout_constraintTop_toBottomOf="@+id/tv_audio_label">
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/tv_audio_label">
 
             <com.google.android.material.imageview.ShapeableImageView
                 android:id="@+id/iv_audio_avatar"
@@ -207,7 +206,7 @@
                 android:layout_height="170dp"
                 android:padding="8dp"
                 android:src="@drawable/ic_no_contacts"
-                app2:shapeAppearanceOverlay="@style/ShapeAppearance.Material3.Corner.Full" />
+                app:shapeAppearanceOverlay="@style/ShapeAppearance.Material3.Corner.Full" />
         </FrameLayout>
 
         <TextView
@@ -217,9 +216,9 @@
             android:text="Encrypted Connection"
             android:textColor="#1FBF9C"
             android:textSize="14sp"
-            app2:layout_constraintEnd_toEndOf="parent"
-            app2:layout_constraintStart_toStartOf="parent"
-            app2:layout_constraintTop_toBottomOf="@+id/tv_audio_duration"/>
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/tv_audio_duration"/>
 
 
         <!-- Bottom Controls -->
@@ -230,9 +229,9 @@
             android:gravity="center"
             android:orientation="horizontal"
             android:layout_marginBottom="50dp"
-            app2:layout_constraintBottom_toTopOf="@+id/btn_audio_hangup"
-            app2:layout_constraintEnd_toEndOf="parent"
-            app2:layout_constraintStart_toStartOf="parent">
+            app:layout_constraintBottom_toTopOf="@+id/btn_audio_hangup"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent">
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_audio_speaker"
@@ -240,12 +239,12 @@
                 android:layout_width="56dp"
                 android:layout_height="56dp"
                 android:background="@drawable/bg_control_button"
-                app2:backgroundTint="@null"
-                app2:icon="@drawable/ic_speaker"
-                app2:iconSize="26dp"
-                app2:iconTint="@color/white"
-                app2:iconGravity="textStart"
-                app2:iconPadding="0dp"/>
+                app:backgroundTint="@null"
+                app:icon="@drawable/ic_speaker"
+                app:iconSize="26dp"
+                app:iconTint="@color/white"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"/>
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_audio_mic"
@@ -254,12 +253,12 @@
                 android:layout_height="56dp"
                 android:layout_marginHorizontal="24dp"
                 android:background="@drawable/bg_control_button"
-                app2:backgroundTint="@null"
-                app2:icon="@drawable/ic_mic"
-                app2:iconSize="26dp"
-                app2:iconTint="@color/white"
-                app2:iconGravity="textStart"
-                app2:iconPadding="0dp" />
+                app:backgroundTint="@null"
+                app:icon="@drawable/ic_mic"
+                app:iconSize="26dp"
+                app:iconTint="@color/white"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_audio_info"
@@ -267,12 +266,12 @@
                 android:layout_width="56dp"
                 android:layout_height="56dp"
                 android:background="@drawable/bg_control_button"
-                app2:backgroundTint="@null"
-                app2:icon="@drawable/ic_info"
-                app2:iconSize="26dp"
-                app2:iconTint="@color/white"
-                app2:iconGravity="textStart"
-                app2:iconPadding="0dp" />
+                app:backgroundTint="@null"
+                app:icon="@drawable/ic_info"
+                app:iconSize="26dp"
+                app:iconTint="@color/white"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp" />
         </LinearLayout>
 
         <com.google.android.material.floatingactionbutton.FloatingActionButton
@@ -281,12 +280,12 @@
             android:layout_height="wrap_content"
             android:src="@drawable/ic_call_end_down"
             android:layout_marginBottom="20dp"
-            app2:layout_constraintBottom_toBottomOf="parent"
-            app2:layout_constraintEnd_toEndOf="parent"
-            app2:layout_constraintStart_toStartOf="parent"
-            app2:backgroundTint="?attr/colorError"
-            app2:fabSize="normal"
-            app2:tint="@android:color/white" />
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:backgroundTint="?attr/colorError"
+            app:fabSize="normal"
+            app:tint="@android:color/white" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 
