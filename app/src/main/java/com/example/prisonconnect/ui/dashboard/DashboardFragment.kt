@@ -64,6 +64,9 @@ class DashboardFragment : Fragment() {
 
         userId?.let { viewModel.loadData(it) }
 
+        // Initialize SMS icon based on current mode
+        updateSmsIcon()
+
         binding.btnLogout.setOnClickListener {
             (activity as? KioskMainActivity)?.navigateToFragment(LoginFragment(), false)
         }
@@ -75,6 +78,40 @@ class DashboardFragment : Fragment() {
         binding.btnToggleMessaging.setOnClickListener {
             showSmsProviderSelector()
         }
+
+        checkFirstTimeLaunch()
+    }
+
+    private fun checkFirstTimeLaunch() {
+        val sharedPref = requireActivity().getSharedPreferences("PrisonPrefs", Context.MODE_PRIVATE)
+        val isFirstTime = sharedPref.getBoolean("is_first_dashboard_launch", true)
+
+        if (isFirstTime) {
+            binding.guideOverlay.visibility = View.VISIBLE
+            binding.btnCloseGuide.setOnClickListener {
+                binding.guideOverlay.visibility = View.GONE
+                sharedPref.edit().putBoolean("is_first_dashboard_launch", false).apply()
+            }
+        }
+    }
+
+    private fun updateSmsIcon() {
+        val sharedPref = requireActivity().getSharedPreferences("PrisonPrefs", Context.MODE_PRIVATE)
+        val savedMode = sharedPref.getString("active_sms_provider", SmsConfig.SMS_MODE.name)
+        val mode = try {
+            SmsMode.valueOf(savedMode ?: SmsConfig.SMS_MODE.name)
+        } catch (e: Exception) {
+            SmsConfig.SMS_MODE
+        }
+
+        val (iconRes, iconTint) = when (mode) {
+            SmsMode.TWILIO -> R.drawable.ic_cloud_sms to R.color.danger
+            SmsMode.DEVICE -> R.drawable.ic_sim_card to R.color.sms
+            SmsMode.LOG -> R.drawable.ic_copy_share to R.color.primary
+        }
+
+        binding.btnToggleMessaging.setIconResource(iconRes)
+        binding.btnToggleMessaging.setIconTintResource(iconTint)
     }
 
     private fun setupRecyclerView() {
@@ -195,7 +232,7 @@ class DashboardFragment : Fragment() {
 
     private fun showSmsProviderSelector() {
         val dialogBinding = DialogSmsProviderSelectorBinding.inflate(layoutInflater)
-        val dialog = MaterialAlertDialogBuilder(requireContext(), R.style.Theme_PrisonConnect_Dialog)
+        val dialog = MaterialAlertDialogBuilder(requireContext(), R.style.Theme_SmsProvider_Dialog)
             .setView(dialogBinding.root)
             .create()
 
@@ -240,6 +277,7 @@ class DashboardFragment : Fragment() {
         dialogBinding.btnSave.setOnClickListener {
             sharedPref.edit().putString("active_sms_provider", selectedMode.name).apply()
             Toast.makeText(context, "SMS provider updated to $selectedMode", Toast.LENGTH_SHORT).show()
+            updateSmsIcon()
             dialog.dismiss()
         }
 

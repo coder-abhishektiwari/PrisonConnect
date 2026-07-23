@@ -101,7 +101,7 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
         if (results.values.all { it }) {
             startCallFlow()
         } else {
-            updateLobbyStatus("❌ Permissions denied. Cannot proceed.")
+            updateLobbyStatus("Permissions denied. Cannot proceed.", LobbyStatusType.FAILURE)
         }
     }
 
@@ -157,7 +157,7 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
                 permissionLauncher.launch(result.permissions.toTypedArray())
             }
             else -> {
-                updateLobbyStatus("⚠️ Hardware diagnostic failed.")
+                updateLobbyStatus("Hardware diagnostic failed.", LobbyStatusType.FAILURE)
             }
         }
     }
@@ -205,7 +205,7 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
         lifecycleScope.launch {
             val roomCreated = createRoomRecord()
             if (!roomCreated) {
-                updateLobbyStatus("❌ Failed to initialize call room.")
+                updateLobbyStatus("Failed to initialize call room.", LobbyStatusType.FAILURE)
                 return@launch
             }
 
@@ -213,21 +213,29 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
             val smsLink =
                 "https://prisonconnect-call.rf.gd/index.html?room=$roomId&token=$roomToken"
 
-            // Update Lobby UI with link and OTP
-            withContext(Dispatchers.Main) {
-                updateLobbyWithCredentials(smsLink, roomOtp)
+            // Log mode shows credentials immediately. Other modes hide them unless failure occurs.
+            val isLogMode = smsController.getProviderName() == "LogSmsProvider"
+            if (isLogMode) {
+                withContext(Dispatchers.Main) {
+                    updateLobbyWithCredentials(smsLink, roomOtp)
+                }
             }
 
             val linkMessage =
                 "PrisonConnect: $typeStr call from $inmateName at $jailName. Join: $smsLink"
 
+            updateLobbyStatus("Sending SMS link...", LobbyStatusType.PENDING)
             val result = smsController.sendSmsViaSupabase(contactPhone, linkMessage)
 
             result.onSuccess {
-                updateLobbyStatus("📱 Call link sent to $contactPhone")
+                updateLobbyStatus("Call link sent to $contactPhone", LobbyStatusType.SUCCESS)
             }.onFailure { error ->
-                updateLobbyStatus("❌ Failed to send call link")
-                Log.e("CallLobby", "SMS sending failed", error)
+                log("SMS sending failed: ${error.message}")
+                updateLobbyStatus("SMS failed: ${error.message}", LobbyStatusType.FAILURE)
+                // Reveal credentials on failure
+                withContext(Dispatchers.Main) {
+                    updateLobbyWithCredentials(smsLink, roomOtp)
+                }
             }
         }
     }
@@ -277,13 +285,13 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
     private fun handleRoomStatus(status: String) {
         log("Room status: $status")
         when (status) {
-            "WAITING" -> updateLobbyStatus("Waiting for terminal...")
+            "WAITING" -> updateLobbyStatus("Waiting for terminal...", LobbyStatusType.PENDING)
             "OTP_SENT" -> {
-                updateLobbyStatus("✅ Link opened! Sending code...")
+                updateLobbyStatus("Link opened! Sending code...", LobbyStatusType.PENDING)
                 if (!isOtpSent) lifecycleScope.launch { sendOtpSms() }
             }
             "ACTIVE" -> {
-                updateLobbyStatus("🔐 Access verified! Connecting...")
+                updateLobbyStatus("Access verified! Connecting...", LobbyStatusType.SUCCESS)
                 onCallActivated()
             }
             "CONNECTED" -> showCallUi()
@@ -294,7 +302,7 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
     private fun handleSignalingEvent(event: CallViewModel.SignalingEvent) {
         when (event) {
             is CallViewModel.SignalingEvent.SiteOpened -> {
-                updateLobbyStatus("✅ Link opened!")
+                updateLobbyStatus("Link opened!", LobbyStatusType.SUCCESS)
                 lifecycleScope.launch {
                     try {
                         DbService.updateFieldsByColumn("call_rooms", "room_id", roomId, mapOf("room_status" to "OTP_SENT"))
@@ -303,7 +311,7 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
                 }
             }
             is CallViewModel.SignalingEvent.OtpVerified -> {
-                updateLobbyStatus("🔐 Access verified!")
+                updateLobbyStatus("Access verified!", LobbyStatusType.SUCCESS)
                 onCallActivated()
             }
             is CallViewModel.SignalingEvent.WebReady -> {
@@ -461,6 +469,8 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
         val tvOtp = findViewById<TextView>(com.example.prisonconnect.R.id.tv_lobby_otp)
         val btnCopyOtp = findViewById<View>(com.example.prisonconnect.R.id.btn_copy_otp)
 
+        val btnCopyBoth = findViewById<View>(com.example.prisonconnect.R.id.btn_copy_both)
+
         if (llLink != null && tvLink != null) {
             tvLink.text = link
             llLink.visibility = View.VISIBLE
@@ -476,6 +486,14 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
                 copyToClipboard("OTP", otp)
             }
         }
+
+        if (btnCopyBoth != null) {
+            btnCopyBoth.visibility = View.VISIBLE
+            btnCopyBoth.setOnClickListener {
+                val combinedText = "Link: $link | OTP: $otp"
+                copyToClipboard("Link + OTP", combinedText)
+            }
+        }
     }
 
     private fun copyToClipboard(label: String, text: String) {
@@ -485,7 +503,34 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
         Toast.makeText(this, "$label copied to clipboard", Toast.LENGTH_SHORT).show()
     }
 
-    protected abstract fun updateLobbyStatus(message: String)
+    enum class LobbyStatusType {
+        SUCCESS, FAILURE, PENDING
+    }
+
+    protected fun cancelLobbyCall() {
+        log("Canceling call from lobby")
+        lifecycleScope.launch(Dispatchers.Main) {
+            try {
+                viewModel.deleteRoom()
+                viewModel.endCall()
+            } catch (e: Exception) {
+                log("Error canceling lobby call", e)
+            }
+            
+            // Cleanup without showing summary dialog
+            try {
+                stopRecordingService()
+                webRtcManager.cleanup()
+                eglBase.release()
+            } catch (e: Exception) {
+                log("Error releasing resources during cancel", e)
+            }
+            
+            finish()
+        }
+    }
+
+    protected abstract fun updateLobbyStatus(message: String, type: LobbyStatusType = LobbyStatusType.PENDING)
     protected abstract fun showCallUi()
 
     protected fun confirmExit() {
@@ -549,6 +594,13 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
     }
 
     protected fun startRecordingService() {
+        // Just bind initially to get audio hooks. 
+        // Do NOT call startForegroundService here to avoid premature notification.
+        val intent = Intent(this, SecureHardwareRecordingService::class.java)
+        bindService(intent, serviceConnection, BIND_AUTO_CREATE)
+    }
+
+    protected fun promoteRecordingServiceToForeground() {
         val intent = Intent(this, SecureHardwareRecordingService::class.java).apply {
             putExtra("ROOM_ID", roomId)
             putExtra("KIOSK_ID", "KIOSK_001")
@@ -558,7 +610,6 @@ abstract class BaseCallActivity<VB : ViewBinding> : AppCompatActivity(), WebRtcM
             putExtra("CALL_TYPE", if (isVideoMode) "VIDEO" else "AUDIO")
         }
         startForegroundService(intent)
-        bindService(intent, serviceConnection, BIND_AUTO_CREATE)
     }
 
     protected fun stopRecordingService() {

@@ -27,7 +27,7 @@ class VideoCallActivity : BaseCallActivity<ActivityVideoCallBinding>() {
         binding.tvVideoName.text = contactName
 
         binding.btnVideoHangup.setOnClickListener { confirmExit() }
-        binding.btnCancelCall.setOnClickListener{ confirmExit() }
+        binding.btnCancelCall.setOnClickListener{ cancelLobbyCall() }
         binding.btnVideoMic.setOnClickListener { toggleMic() }
         binding.btnVideoSpeaker.setOnClickListener { toggleSpeaker() }
         binding.btnVideoSwitch.setOnClickListener { webRtcManager.switchCamera() }
@@ -39,6 +39,9 @@ class VideoCallActivity : BaseCallActivity<ActivityVideoCallBinding>() {
     override fun onCallActivated() {
         if (!isCallStarted.compareAndSet(false, true)) return
         log("Activating WebRTC Video...")
+
+        // Promote service to foreground now that the call is starting
+        promoteRecordingServiceToForeground()
 
         lifecycleScope.launch(Dispatchers.Main) {
             waitForWebRtcReady()
@@ -75,8 +78,16 @@ class VideoCallActivity : BaseCallActivity<ActivityVideoCallBinding>() {
         super.onBalanceUpdated(balance)
     }
 
-    override fun updateLobbyStatus(message: String) {
-        binding.tvLobbyStatus.text = message
+    override fun updateLobbyStatus(message: String, type: BaseCallActivity.LobbyStatusType) {
+        runOnUiThread {
+            binding.tvLobbyStatus.text = message
+            val colorRes = when (type) {
+                BaseCallActivity.LobbyStatusType.SUCCESS -> R.color.primary
+                BaseCallActivity.LobbyStatusType.FAILURE -> R.color.danger
+                BaseCallActivity.LobbyStatusType.PENDING -> R.color.sms
+            }
+            binding.tvLobbyStatus.setTextColor(getColor(colorRes))
+        }
     }
 
     override fun showCallUi() {

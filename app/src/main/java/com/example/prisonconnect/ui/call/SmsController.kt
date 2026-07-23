@@ -18,6 +18,8 @@ class SmsController(context: Context) {
     private val logger = Logger("SmsController")
     private val provider: SmsProvider = SmsProviderFactory.createProvider(context)
 
+    fun getProviderName(): String = provider.javaClass.simpleName
+
     /**
      * Sends an SMS message using the active provider.
      *

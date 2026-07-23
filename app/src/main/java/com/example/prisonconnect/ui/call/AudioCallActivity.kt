@@ -27,7 +27,7 @@ class AudioCallActivity : BaseCallActivity<ActivityAudioCallBinding>() {
         binding.tvAudioPhone.text = contactPhone
 
         binding.btnAudioHangup.setOnClickListener { confirmExit() }
-        binding.btnCancelCall.setOnClickListener { confirmExit() }
+        binding.btnCancelCall.setOnClickListener { cancelLobbyCall() }
         binding.btnAudioMic.setOnClickListener { toggleMic() }
         binding.btnAudioSpeaker.setOnClickListener { toggleSpeaker() }
         binding.btnAudioInfo.setOnClickListener { showCallInfoTooltip() }
@@ -36,6 +36,9 @@ class AudioCallActivity : BaseCallActivity<ActivityAudioCallBinding>() {
     override fun onCallActivated() {
         if (!isCallStarted.compareAndSet(false, true)) return
         log("Activating WebRTC Audio...")
+
+        // Promote service to foreground now that the call is starting
+        promoteRecordingServiceToForeground()
 
         lifecycleScope.launch(Dispatchers.Main) {
             waitForWebRtcReady()
@@ -56,9 +59,15 @@ class AudioCallActivity : BaseCallActivity<ActivityAudioCallBinding>() {
      binding.tvAudioDuration.text = formatSeconds(seconds)
     }
 
-    override fun updateLobbyStatus(message: String) {
+    override fun updateLobbyStatus(message: String, type: BaseCallActivity.LobbyStatusType) {
         runOnUiThread {
             binding.tvLobbyStatus.text = message
+            val colorRes = when (type) {
+                BaseCallActivity.LobbyStatusType.SUCCESS -> R.color.primary
+                BaseCallActivity.LobbyStatusType.FAILURE -> R.color.danger
+                BaseCallActivity.LobbyStatusType.PENDING -> R.color.sms
+            }
+            binding.tvLobbyStatus.setTextColor(getColor(colorRes))
         }
     }
 

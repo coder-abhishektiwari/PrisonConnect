@@ -23,7 +23,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center"
-            android:text="Secure Video Terminal"
+            android:text="Please Wait"
             android:textAppearance="?attr/textAppearanceHeadlineSmall"
             android:textColor="?attr/colorOnSurface"
             android:textStyle="bold" />
@@ -38,13 +38,14 @@
             android:textAppearance="?attr/textAppearanceBodyLarge"
             android:textColor="?attr/colorOnSurfaceVariant" />
 
-        <ProgressBar
+        <com.google.android.material.progressindicator.LinearProgressIndicator
             android:id="@+id/lobby_progress"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
             android:indeterminate="true"
-            android:indeterminateTint="?attr/colorPrimary" />
+            app:indicatorColor="?attr/colorPrimary"
+            app:trackColor="?attr/colorSurfaceVariant" />
 
         <!-- Link Copy Section -->
         <LinearLayout
@@ -76,6 +77,7 @@
                 app2:icon="@drawable/ic_copy_share"
                 app2:iconSize="18dp"
                 app2:iconTint="?attr/colorPrimary" />
+
         </LinearLayout>
 
         <!-- OTP Copy Section -->
@@ -107,7 +109,18 @@
                 app2:icon="@drawable/ic_copy_share"
                 app2:iconSize="18dp"
                 app2:iconTint="?attr/colorPrimary" />
+
         </LinearLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_copy_both"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Copy Link + OTP"
+            android:visibility="gone"
+            app2:icon="@drawable/ic_copy_share" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_cancel_call"
@@ -117,6 +130,8 @@
             android:layout_marginTop="48dp"
             android:text="Cancel Call"
             android:textAllCaps="false" />
+
+
     </LinearLayout>
 
     <!-- VIDEO CALL UI -->

@@ -73,16 +73,21 @@ class SecureHardwareRecordingService : Service(),
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        roomId = intent?.getStringExtra("ROOM_ID")
-        kioskId = intent?.getStringExtra("KIOSK_ID")
-        sessionId = intent?.getStringExtra("SESSION_ID")
-        inmateName = intent?.getStringExtra("INMATE_NAME") ?: "UnknownInmate"
-        receiverName = intent?.getStringExtra("RECEIVER_NAME") ?: "UnknownReceiver"
-        isVideoCall = intent?.getStringExtra("CALL_TYPE") != "AUDIO"
+        if (intent == null) return START_NOT_STICKY
+        
+        roomId = intent.getStringExtra("ROOM_ID")
+        kioskId = intent.getStringExtra("KIOSK_ID")
+        sessionId = intent.getStringExtra("SESSION_ID")
+        inmateName = intent.getStringExtra("INMATE_NAME") ?: "UnknownInmate"
+        receiverName = intent.getStringExtra("RECEIVER_NAME") ?: "UnknownReceiver"
+        isVideoCall = intent.getStringExtra("CALL_TYPE") != "AUDIO"
 
-        startForegroundWithType()
-        startRecording()
-        startKillSwitchInterlock()
+        // Only start foreground and recording when we have actual call parameters
+        if (roomId != null) {
+            startForegroundWithType()
+            startRecording()
+            startKillSwitchInterlock()
+        }
 
         return START_STICKY
     }

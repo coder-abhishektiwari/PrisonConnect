@@ -26,4 +26,15 @@
     <style name="Theme.PrisonConnect.Dialog" parent="Theme.Material3.DayNight.Dialog">
         <item name="android:windowBackground">@android:color/transparent</item>
     </style>
+
+    <style name="Theme.SmsProvider.Dialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="materialAlertDialogBodyTextStyle">@style/TextAppearance.Material3.BodyMedium</item>
+
+        <item name="shapeAppearanceMediumComponent">@style/DialogShape</item>
+    </style>
+
+    <style name="DialogShape">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">24dp</item>
+    </style>
 </resources>

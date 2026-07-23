@@ -1,365 +1,902 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>PrisonConnect</title>
-    <link rel="icon" type="image/png" href="ic_icon.png">
-    <!-- Supabase JS Standard Library CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>PrisonConnect</title>
+  <link rel="icon" type="image/png" href="ic_icon.png">
+  <!-- Supabase JS Standard Library CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-    <style>
-        :root{
-          --ink:#0B1E23;
-          --panel:#0F2A2E;
-          --panel-raised:#143A3E;
-          --line: rgba(255,255,255,0.08);
-          --teal:#1FBF9C;
-          --teal-dim: rgba(31,191,156,0.16);
-          --amber:#E0A63A;
-          --red:#E1503F;
-          --text:#EAF3F1;
-          --text-dim:#8FA6A3;
-          --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
-          --mono: 'SFMono-Regular', Consolas, monospace;
-        }
-        *{box-sizing:border-box; margin:0; padding:0;}
-        html,body{height:100%;}
-        body{
-          font-family: var(--font);
-          background:
-            radial-gradient(circle at 20% -10%, rgba(31,191,156,0.10), transparent 45%),
-            radial-gradient(circle at 90% 110%, rgba(31,191,156,0.06), transparent 40%),
-            var(--ink);
-          color: var(--text);
-          min-height:100%;
-          display:flex;
-          align-items:center;
-          justify-content:center;
-          padding: 24px;
-        }
-        .device{
-          width:100%;
-          max-width:400px;
-          min-height:720px;
-          background: var(--panel);
-          border:1px solid var(--line);
-          border-radius:28px;
-          overflow:hidden;
-          display:flex;
-          flex-direction:column;
-          box-shadow: 0 40px 80px -30px rgba(0,0,0,0.6);
-          position:relative;
-        }
-        .topbar{
-          display:flex; align-items:center; gap:10px;
-          padding:18px 20px 14px;
-          border-bottom:1px solid var(--line);
-        }
-        .badge{
-          width:8px;height:8px;border-radius:50%;
-          background: var(--teal);
-          box-shadow: 0 0 0 4px var(--teal-dim);
-        }
-        .topbar .label{ font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:var(--text-dim);}
-        .topbar .label b{color:var(--text); font-weight:600;}
+  <style>
+    :root {
+      --ink: #0B1E23;
+      --panel: #0F2A2E;
+      --panel-raised: #143A3E;
+      --line: rgba(255, 255, 255, 0.08);
+      --teal: #1FBF9C;
+      --teal-dim: rgba(31, 191, 156, 0.16);
+      --amber: #E0A63A;
+      --red: #E1503F;
+      --text: #EAF3F1;
+      --text-dim: #8FA6A3;
+      --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      --mono: 'SFMono-Regular', Consolas, monospace;
+    }
 
-        .screen{ flex:1; display:none; flex-direction:column; padding:32px 24px; }
-        .screen.active{ display:flex; }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
-        /* ---- Screen Landing ---- */
-        #screen-landing{ align-items:center; justify-content:center; text-align:center; gap:22px; }
-        .shield{
-          width:76px; height:76px; border-radius:20px;
-          background: var(--teal-dim);
-          display:flex; align-items:center; justify-content:center;
-          border:1px solid rgba(31,191,156,0.35);
-        }
-        .shield svg{ width:34px; height:34px; }
-        .spinner{
-          width:30px; height:30px;
-          border-radius:50%;
-          border:3px solid var(--line);
-          border-top-color: var(--teal);
-          animation: spin 0.9s linear infinite;
-        }
-        @keyframes spin{ to{ transform: rotate(360deg); } }
-        h1{ font-size:19px; font-weight:600; letter-spacing:-0.01em; }
-        .sub{ font-size:13.5px; color:var(--text-dim); max-width:280px; line-height:1.5; }
-        .meta{ font-family:var(--mono); font-size:11px; color:var(--text-dim); background:rgba(255,255,255,0.03); border:1px solid var(--line); padding:8px 12px; border-radius:8px; }
+    html,
+    body {
+      height: 100%;
+      user-select: none;
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
 
-        /* ---- Screen OTP ---- */
-        #screen-otp{ justify-content:center; gap:20px; }
-        .otp-inputs{ display:flex; gap:10px; justify-content:center; margin:6px 0 4px; }
-        .otp-inputs input{
-          width:44px; height:54px;
-          text-align:center;
-          font-size:20px; font-weight:600;
-          color:var(--text);
-          background: rgba(255,255,255,0.04);
-          border:1px solid var(--line);
-          border-radius:12px;
-          outline:none;
-        }
-        .otp-inputs input:focus{ border-color: var(--teal); box-shadow: 0 0 0 3px var(--teal-dim); }
-        .otp-error{ font-size:12.5px; color:var(--red); min-height:16px; text-align:center; }
-        .resend-row{ display:flex; justify-content:center; align-items:center; gap:8px; font-size:13px; color:var(--text-dim); }
-        .resend-row button{ color:var(--teal); font-weight:600; }
-        .resend-row button:disabled{ color:var(--text-dim); cursor:not-allowed; text-decoration:none; }
+      -webkit-touch-callout: none;
+    }
 
-        /* ---- Buttons ---- */
-        button{ font-family:inherit; border:none; background:none; cursor:pointer; }
-        .btn{
-          width:100%;
-          padding:15px;
-          border-radius:14px;
-          font-size:15px; font-weight:600;
-          background: var(--teal);
-          color:#04211B;
-          transition: transform .15s ease, opacity .15s ease;
-        }
-        .btn:active{ transform: scale(0.98); }
-        .btn:disabled{ opacity:0.4; cursor:not-allowed; }
-    
-        /* ---- Screen Error ---- */
-        #screen-error{ align-items:center; justify-content:center; text-align:center; gap:22px; }
-        #screen-error h1{ font-size:24px; color:var(--red); }
-        #screen-error p{ font-size:14px; color:var(--text-dim); }
+    body {
+      font-family: var(--font);
+      background:
+        radial-gradient(circle at 20% -10%, rgba(31, 191, 156, 0.10), transparent 45%),
+        radial-gradient(circle at 90% 110%, rgba(31, 191, 156, 0.06), transparent 40%),
+        var(--ink);
+      color: var(--text);
+      min-height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
 
-        /* ---- Screen Call (Unified Wrapper) ---- */
-        #screen-call{ padding:0; position:relative; background:#000; overflow:hidden; }
-        .video-wrap{ position:relative; height: 100%; width: 100%; display:flex; flex-direction:column; pointer-events: none; }
-        .video-wrap > * { pointer-events: auto; }
-        video{ width:100%; height:100%; object-fit:cover; background:#000; }
-        #localVideo{
-          position:absolute; width:110px; height:150px; right:16px; top:80px;
-          border-radius:14px; border:2px solid rgba(255,255,255,0.2);
-          object-fit:cover; box-shadow:0 10px 24px rgba(0,0,0,0.4);
-          z-index: 10; cursor: move;
-        }
+    .device {
+      width: 100%;
+      max-width: 400px;
+      min-height: 720px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 40px 80px -30px rgba(0, 0, 0, 0.6);
+      position: relative;
+    }
 
-        /* Video Overlays (Android Style) */
-        .video-header{
-          position:absolute; top:0; left:0; right:0;
-          padding:20px;
-          background: linear-gradient(to bottom, rgba(0,0,0,0.6), transparent);
-          display:flex; flex-direction:column; align-items:center;
-          z-index: 20; transition: opacity 0.3s;
-        }
-        .video-footer{
-          position:absolute; bottom:0; left:0; right:0;
-          padding:24px 20px 40px;
-          background: linear-gradient(to top, rgba(0,0,0,0.6), transparent);
-          display:flex; align-items:center; justify-content:center; gap:24px;
-          z-index: 20; transition: opacity 0.3s;
-        }
-        .video-header .name{ font-size:18px; font-weight:bold; margin-bottom:4px; }
-        .video-header .timer{ font-family:var(--mono); font-size:16px; }
-        .video-header .balance{ font-size:12px; color:rgba(255,255,255,0.7); margin-top:2px; }
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 18px 20px 14px;
+      border-bottom: 1px solid var(--line);
+    }
 
-        /* Audio UI (Android Style) */
-        #audioOnlyUI{
-          position:absolute; inset:0; z-index:5; background:var(--panel);
-          display:none; flex-direction:column; align-items:center; justify-content:space-between;
-          padding:40px 24px 60px; text-align:center;
-        }
-        .audio-label{ font-size:16px; color:var(--text-dim); }
-        .avatar-box{
-          width:180px; height:180px; border-radius:50%;
-          border:4px solid var(--teal-dim); padding:8px;
-          background: radial-gradient(circle, var(--panel-raised), var(--panel));
-        }
-        .avatar-box img{ width:100%; height:100%; border-radius:50%; object-fit:cover; border:2px solid var(--line); }
-        .audio-name{ font-size:26px; font-weight:bold; margin-top:24px; }
-        .audio-phone{ font-size:16px; color:var(--text-dim); margin-top:4px; }
-        .audio-timer{ font-family:var(--mono); font-size:32px; font-weight:bold; margin-top:24px; }
-        .audio-status{ color:var(--teal); font-size:14px; margin-top:8px; font-weight:600; }
+    .badge {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--teal);
+      box-shadow: 0 0 0 4px var(--teal-dim);
+    }
 
-        /* Controls Components */
-        .ctrl-btn{
-          width:56px; height:56px; border-radius:50%;
-          background: rgba(255,255,255,0.1); backdrop-filter: blur(10px);
-          display:flex; align-items:center; justify-content:center;
-          border:1px solid rgba(255,255,255,0.1);
-          color: white; transition: background 0.2s;
-        }
-        .ctrl-btn:active{ background: rgba(255,255,255,0.2); }
-        .ctrl-btn.active{ background: var(--teal); color: #04211B; }
-        .ctrl-btn.danger{ background: var(--red); box-shadow: 0 8px 20px rgba(225,80,63,0.3); }
-        .ctrl-btn svg{ width:26px; height:26px; }
+    .topbar .label {
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
 
-        .rec-pill{
-          position:absolute; top:16px; left:16px;
-          display:flex; align-items:center; gap:6px;
-          background:rgba(0,0,0,0.5); backdrop-filter: blur(6px);
-          padding:6px 10px 6px 8px; border-radius:999px;
-          font-size:11px; font-weight:600; letter-spacing:0.02em;
-          z-index: 30; border: 1px solid rgba(255,255,255,0.1);
-        }
-        .rec-dot{ width:8px; height:8px; border-radius:50%; background:var(--red); animation: blink 1s ease-in-out infinite; }
-        @keyframes blink{ 0%,100%{opacity:1;} 50%{opacity:0.25;} }
+    .topbar .label b {
+      color: var(--text);
+      font-weight: 600;
+    }
 
-        /* Info Dialog Overlay */
-        #infoDialog{
-          position:fixed; inset:0; background:rgba(0,0,0,0.8);
-          display:none; align-items:center; justify-content:center; z-index:100; padding:20px;
-        }
-        #endingOverlay{
-          position:fixed; inset:0; background:var(--ink);
-          display:none; flex-direction:column; align-items:center; justify-content:center;
-          z-index:200; text-align:center; gap:20px;
-        }
-        .dialog-card{
-          background:var(--panel-raised); border-radius:24px; padding:24px;
-          width:100%; max-width:320px; border:1px solid var(--line);
-        }
-        .dialog-card h2{ font-size:20px; margin-bottom:16px; }
-        .dialog-card p{ font-size:14px; color:var(--text-dim); margin-bottom:8px; line-height:1.5; }
-        .dialog-card b{ color:var(--text); }
+    .screen {
+      flex: 1;
+      display: none;
+      flex-direction: column;
+      padding: 32px 24px;
+    }
 
-        .console{
-          margin-top:auto;
-          font-family:var(--mono); font-size:10.5px; color:var(--text-dim);
-          background:rgba(255,255,255,0.03); border:1px solid var(--line);
-          border-radius:10px; padding:10px 12px; max-height:110px; overflow-y:auto;
-          line-height:1.6;
-        }
-        .console .line{ opacity:0.85; }
-        .console .line.ok{ color: var(--teal); }
-        .console .line.warn{ color: var(--amber); }
+    .screen.active {
+      display: flex;
+    }
 
-        /* Layout modifications for mobile */
-        @media (max-width: 400px) {
-            body { padding: 0; }
-            .device { height: 100vh; border-radius: 0; border: none; max-width: 100vw; }
-        }
-    </style>
+    /* ---- Screen Landing ---- */
+    #screen-landing {
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      gap: 22px;
+    }
+
+    .shield {
+      width: 76px;
+      height: 76px;
+      border-radius: 20px;
+      background: var(--teal-dim);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid rgba(31, 191, 156, 0.35);
+    }
+
+    .shield svg {
+      width: 34px;
+      height: 34px;
+    }
+
+    .spinner {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      border: 3px solid var(--line);
+      border-top-color: var(--teal);
+      animation: spin 0.9s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    h1 {
+      font-size: 19px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    .sub {
+      font-size: 13.5px;
+      color: var(--text-dim);
+      max-width: 280px;
+      line-height: 1.5;
+    }
+
+    .meta {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-dim);
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--line);
+      padding: 8px 12px;
+      border-radius: 8px;
+    }
+
+    /* ---- Screen OTP ---- */
+    #screen-otp {
+      justify-content: center;
+      gap: 20px;
+    }
+
+    .otp-inputs {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      margin: 6px 0 4px;
+    }
+
+    .otp-inputs input {
+      width: 44px;
+      height: 54px;
+      text-align: center;
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      outline: none;
+    }
+
+    .otp-inputs input:focus {
+      border-color: var(--teal);
+      box-shadow: 0 0 0 3px var(--teal-dim);
+    }
+
+    .otp-error {
+      font-size: 12.5px;
+      color: var(--red);
+      min-height: 16px;
+      text-align: center;
+    }
+
+    .resend-row {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+
+    .resend-row button {
+      color: var(--teal);
+      font-weight: 600;
+    }
+
+    .resend-row button:disabled {
+      color: var(--text-dim);
+      cursor: not-allowed;
+      text-decoration: none;
+    }
+
+    /* ---- Buttons ---- */
+    button {
+      font-family: inherit;
+      border: none;
+      background: none;
+      cursor: pointer;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 15px;
+      border-radius: 14px;
+      font-size: 15px;
+      font-weight: 600;
+      background: var(--teal);
+      color: #04211B;
+      transition: transform .15s ease, opacity .15s ease;
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    /* ---- Screen Error ---- */
+    #screen-error {
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      gap: 22px;
+    }
+
+    #screen-error h1 {
+      font-size: 24px;
+      color: var(--red);
+    }
+
+    #screen-error p {
+      font-size: 14px;
+      color: var(--text-dim);
+    }
+
+    /* ---- Screen Call (Unified Wrapper) ---- */
+    #screen-call {
+      padding: 0;
+      position: relative;
+      background: #000;
+      overflow: hidden;
+    }
+
+    .video-wrap {
+      position: relative;
+      height: 100%;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    video {
+      width: 100%;
+      height: 100%;
+      background: #000;
+    }
+
+    #remoteVideo {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      object-fit: contain;
+    }
+
+    #localVideo {
+      position: absolute;
+      width: 110px;
+      height: 150px;
+      right: 16px;
+      top: 80px;
+      border-radius: 14px;
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      object-fit: cover;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
+      z-index: 10;
+      cursor: move;
+    }
+
+    /* Video Overlays (Android Style) */
+    .video-header {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: 20px;
+      background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      z-index: 20;
+      transition: opacity 0.3s;
+    }
+
+    .video-footer {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 24px 20px 40px;
+      background: linear-gradient(to top, rgba(0, 0, 0, 0.6), transparent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      z-index: 20;
+      transition: opacity 0.3s;
+    }
+
+    .video-header .name {
+      font-size: 18px;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+
+    .video-header .timer {
+      font-family: var(--mono);
+      font-size: 16px;
+    }
+
+    .video-header .balance {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.7);
+      margin-top: 2px;
+    }
+
+    /* Audio UI (Android Style) */
+    #audioOnlyUI {
+      position: absolute;
+      inset: 0;
+      z-index: 5;
+      background: var(--panel);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: 40px 24px 60px;
+      text-align: center;
+    }
+
+    .audio-label {
+      font-size: 16px;
+      color: var(--text-dim);
+    }
+
+    .avatar-box {
+      width: 180px;
+      height: 180px;
+      border-radius: 50%;
+      border: 4px solid var(--teal-dim);
+      padding: 8px;
+      background: radial-gradient(circle, var(--panel-raised), var(--panel));
+    }
+
+    .avatar-box img {
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 2px solid var(--line);
+    }
+
+    .audio-name {
+      font-size: 26px;
+      font-weight: bold;
+      margin-top: 24px;
+    }
+
+    .audio-phone {
+      font-size: 16px;
+      color: var(--text-dim);
+      margin-top: 4px;
+    }
+
+    .audio-timer {
+      font-family: var(--mono);
+      font-size: 32px;
+      font-weight: bold;
+      margin-top: 24px;
+    }
+
+    .audio-status {
+      color: var(--teal);
+      font-size: 14px;
+      margin-top: 8px;
+      font-weight: 600;
+    }
+
+    /* Controls Components */
+    .ctrl-btn {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: white;
+      transition: background 0.2s;
+    }
+
+    .ctrl-btn:active {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .ctrl-btn.active {
+      background: var(--teal);
+      color: #04211B;
+    }
+
+    .ctrl-btn.danger {
+      background: var(--red);
+      box-shadow: 0 8px 20px rgba(225, 80, 63, 0.3);
+    }
+
+    .ctrl-btn svg {
+      width: 26px;
+      height: 26px;
+    }
+
+    .rec-pill {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(6px);
+      padding: 6px 10px 6px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      z-index: 30;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .rec-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--red);
+      animation: blink 1s ease-in-out infinite;
+    }
+
+    @keyframes blink {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.25;
+      }
+    }
+
+    /* Info Dialog Overlay */
+    #infoDialog {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.8);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      padding: 20px;
+    }
+
+    #endingOverlay {
+      position: fixed;
+      inset: 0;
+      background: var(--ink);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 200;
+      text-align: center;
+      gap: 20px;
+    }
+
+    .dialog-card {
+      background: var(--panel-raised);
+      border-radius: 24px;
+      padding: 24px;
+      width: 100%;
+      max-width: 320px;
+      border: 1px solid var(--line);
+    }
+
+    .dialog-card h2 {
+      font-size: 20px;
+      margin-bottom: 16px;
+    }
+
+    .dialog-card p {
+      font-size: 14px;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+      line-height: 1.5;
+    }
+
+    .dialog-card b {
+      color: var(--text);
+    }
+
+    .console {
+      display: none;
+      margin-top: auto;
+      font-family: var(--mono);
+      font-size: 10.5px;
+      color: var(--text-dim);
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 12px;
+      max-height: 110px;
+      overflow-y: auto;
+      line-height: 1.6;
+    }
+
+    .console .line {
+      opacity: 0.85;
+    }
+
+    .console .line.ok {
+      color: var(--teal);
+    }
+
+    .console .line.warn {
+      color: var(--amber);
+    }
+
+    /* Layout modifications for mobile */
+    @media (max-width: 400px) {
+      body {
+        padding: 0;
+      }
+
+      .device {
+        height: 100vh;
+        border-radius: 0;
+        border: none;
+        max-width: 100vw;
+      }
+    }
+  </style>
 </head>
+
 <body>
 
-<div class="device">
+  <div class="device">
     <div class="topbar">
-        <div class="badge"></div>
-        <div class="label" id="roomLabel">Secure Facility Link&nbsp; &middot; &nbsp;<b id="roomText">Loading...</b></div>
+      <div class="badge"></div>
+      <div class="label" id="roomLabel">Secure Facility Link&nbsp; &middot; &nbsp;<b id="roomText">Loading...</b></div>
     </div>
 
     <!-- SCREEN Error -->
     <section id="screen-error" class="screen">
-        <h1>Room Not Found</h1>
-        <p>The call link is invalid or has expired. Please ask the inmate to initiate a new call.</p>
+      <h1>Room Not Found</h1>
+      <p>The call link is invalid or has expired. Please ask the inmate to initiate a new call.</p>
+    </section>
+
+    <!-- SCREEN Permission -->
+    <section id="screen-permission" class="screen">
+      <div class="shield" style="background:var(--teal-dim); border-color:var(--teal);">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+          stroke-linejoin="round" class="feather feather-camera">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+          <circle cx="12" cy="13" r="4"></circle>
+        </svg>
+      </div>
+      <h1>Media Blocked</h1>
+      <p id="permDesc">Camera or Microphone access is required to join this call. Please click the <b>Lock icon</b> in
+        your address bar and enable permissions.</p>
+      <button class="btn" id="retryPermBtn">Try Again</button>
     </section>
 
     <!-- SCREEN Landing -->
     <section id="screen-landing" class="screen active">
-        <div class="shield">
-            <svg viewBox="0 0 24 24" fill="none" stroke="#1FBF9C" stroke-width="1.8"><path d="M12 2l8 4v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6l8-4z"/><path d="M9 12l2 2 4-4"/></svg>
-        </div>
-        <h1>Verifying secure connection</h1>
-        <p class="sub">You've received a call request from a correctional facility. We're automatically confirming this session.</p>
-        <div class="spinner"></div>
-        <div class="meta" id="landingMeta">Verifying routing signatures...</div>
+      <div class="shield">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#1FBF9C" stroke-width="1.8">
+          <path d="M12 2l8 4v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6l8-4z" />
+          <path d="M9 12l2 2 4-4" />
+        </svg>
+      </div>
+      <h1>Verifying secure connection</h1>
+      <p class="sub">You've received a call request from a correctional facility. We're automatically confirming this
+        session.</p>
+      <div class="spinner"></div>
+      <div class="meta" id="landingMeta">Verifying routing signatures...</div>
     </section>
 
     <!-- SCREEN OTP -->
     <section id="screen-otp" class="screen">
-        <h1 style="text-align:center;">Enter access code</h1>
-        <p class="sub" style="text-align:center; margin:0 auto;">Automatic verification didn't complete. Enter the 6-digit code sent to your phone via SMS.</p>
-        <div class="otp-inputs" id="otpInputs">
-            <input maxlength="1" inputmode="numeric" />
-            <input maxlength="1" inputmode="numeric" />
-            <input maxlength="1" inputmode="numeric" />
-            <input maxlength="1" inputmode="numeric" />
-            <input maxlength="1" inputmode="numeric" />
-            <input maxlength="1" inputmode="numeric" />
-        </div>
-        <div class="otp-error" id="otpError"></div>
-        <button class="btn" id="verifyBtn">Verify & Join Call</button>
-        <div class="resend-row">
-            <span>Didn't get a code?</span>
-            <button id="resendBtn">Resend OTP</button>
-        </div>
+      <h1 style="text-align:center;">Enter access code</h1>
+      <p class="sub" style="text-align:center; margin:0 auto;">Automatic verification didn't complete. Enter the 6-digit
+        code sent to your phone via SMS.</p>
+      <div class="otp-inputs" id="otpInputs">
+        <input maxlength="1" inputmode="numeric" />
+        <input maxlength="1" inputmode="numeric" />
+        <input maxlength="1" inputmode="numeric" />
+        <input maxlength="1" inputmode="numeric" />
+        <input maxlength="1" inputmode="numeric" />
+        <input maxlength="1" inputmode="numeric" />
+      </div>
+      <div class="otp-error" id="otpError"></div>
+      <button class="btn" id="verifyBtn">Verify & Join Call</button>
+      <div class="resend-row">
+        <span>Didn't get a code?</span>
+        <button id="resendBtn">Resend OTP</button>
+      </div>
     </section>
 
     <!-- SCREEN Call -->
     <section id="screen-call" class="screen">
-        <!-- Persistent Remote Video/Audio outside of toggleable wrappers -->
-        <video id="remoteVideo" autoplay playsinline style="position:absolute; inset:0; z-index: 1; width:100%; height:100%; object-fit:cover; background:#000;"></video>
+      <!-- Persistent Remote Video/Audio outside of toggleable wrappers -->
+      <video id="remoteVideo" autoplay playsinline
+        style="position:absolute; inset:0; z-index: 1; width:100%; height:100%; object-fit:cover; background:#000;"></video>
 
-        <div class="video-wrap" id="videoLayout">
-            <video id="localVideo" autoplay playsinline muted></video>
+      <div class="video-wrap" id="videoLayout">
+        <video id="localVideo" autoplay playsinline muted></video>
 
-            <div class="video-header" id="videoHeader">
-                <div class="name" id="videoName">Inmate Name</div>
-                <div class="timer" id="videoTimer">00:00:00</div>
-                <div class="balance" id="videoBalance">Bal: 00:00:00</div>
-            </div>
-
-            <div class="video-footer" id="videoFooter">
-                <button class="ctrl-btn" id="videoSpeakerBtn" title="Speaker">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77zM3 9v6h4l5 5V3L7 8H3z"/></svg>
-                </button>
-                <button class="ctrl-btn" id="videoMicBtn" title="Mute/Unmute">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 14 3 14zM17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
-                </button>
-                <button class="ctrl-btn danger" id="videoHangupBtn" title="Hang Up">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.58.9-.98.49-1.87 1.15-2.62 1.93-.19.19-.51.27-.77.27-.26 0-.51-.07-.71-.27L.29 13.5a.98.98 0 0 1 0-1.41C2.75 9.63 7.17 8 12 8s9.25 1.63 11.71 4.09a.98.98 0 0 1 0 1.41l-2.43 2.44c-.4.4-1.05.4-1.45.03-.75-.78-1.64-1.44-2.62-1.93-.35-.17-.58-.52-.58-.91v-3.1C15.15 9.25 13.6 9 12 9z"/></svg>
-                </button>
-                <button class="ctrl-btn" id="videoCameraBtn" title="Toggle Camera">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 4h-3.17L15 2H9L7.17 4H4C2.9 4 2 4.9 2 6v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 14c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
-                </button>
-            </div>
+        <div class="video-header" id="videoHeader">
+          <div class="name" id="videoName">Inmate Name</div>
+          <div class="timer" id="videoTimer">00:00:00</div>
+          <div class="balance" id="videoBalance">Bal: 00:00:00</div>
         </div>
 
-        <div id="audioOnlyUI">
-            <div class="audio-label">Secure Voice Call</div>
-
-            <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;">
-                <div class="avatar-box">
-                    <img id="audioAvatar" src="ic_icon.png" alt="Avatar" />
-                </div>
-                <div class="audio-name" id="audioName">Inmate Name</div>
-                <div class="audio-phone" id="audioPhone">+91 0000000000</div>
-                <div class="audio-timer" id="audioTimer">00:00:00</div>
-                <div class="audio-status">Encrypted Connection</div>
-            </div>
-
-            <div class="video-footer" style="position:static; background:none; padding:0; gap:32px;">
-                <button class="ctrl-btn" id="audioSpeakerBtn" title="Speaker">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77zM3 9v6h4l5 5V3L7 8H3z"/></svg>
-                </button>
-                <button class="ctrl-btn" id="audioMicBtn" title="Mute">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 14 3 14zM17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
-                </button>
-                <button class="ctrl-btn danger" id="audioHangupBtn" title="Hang Up">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.58.9-.98.49-1.87 1.15-2.62 1.93-.19.19-.51.27-.77.27-.26 0-.51-.07-.71-.27L.29 13.5a.98.98 0 0 1 0-1.41C2.75 9.63 7.17 8 12 8s9.25 1.63 11.71 4.09a.98.98 0 0 1 0 1.41l-2.43 2.44c-.4.4-1.05.4-1.45.03-.75-.78-1.64-1.44-2.62-1.93-.35-.17-.58-.52-.58-.91v-3.1C15.15 9.25 13.6 9 12 9z"/></svg>
-                </button>
-                <button class="ctrl-btn" id="audioInfoBtn" title="Info">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-                </button>
-            </div>
+        <div class="video-footer" id="videoFooter">
+          <button class="ctrl-btn" id="videoSpeakerBtn" title="Speaker">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path
+                d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77zM3 9v6h4l5 5V3L7 8H3z" />
+            </svg>
+          </button>
+          <button class="ctrl-btn" id="videoMicBtn" title="Mute/Unmute">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path
+                d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 14 3 14zM17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+            </svg>
+          </button>
+          <button class="ctrl-btn danger" id="videoHangupBtn" title="Hang Up">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path
+                d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.58.9-.98.49-1.87 1.15-2.62 1.93-.19.19-.51.27-.77.27-.26 0-.51-.07-.71-.27L.29 13.5a.98.98 0 0 1 0-1.41C2.75 9.63 7.17 8 12 8s9.25 1.63 11.71 4.09a.98.98 0 0 1 0 1.41l-2.43 2.44c-.4.4-1.05.4-1.45.03-.75-.78-1.64-1.44-2.62-1.93-.35-.17-.58-.52-.58-.91v-3.1C15.15 9.25 13.6 9 12 9z" />
+            </svg>
+          </button>
+          <button class="ctrl-btn" id="videoCameraBtn" title="Toggle Camera">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path
+                d="M20 4h-3.17L15 2H9L7.17 4H4C2.9 4 2 4.9 2 6v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 14c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" />
+            </svg>
+          </button>
         </div>
+      </div>
+
+      <div id="audioOnlyUI">
+        <div class="audio-label">Secure Voice Call</div>
+
+        <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+          <div class="avatar-box">
+            <img id="audioAvatar" src="ic_icon.png" alt="Avatar" />
+          </div>
+          <div class="audio-name" id="audioName">Inmate Name</div>
+          <div class="audio-phone" id="audioPhone">+91 0000000000</div>
+          <div class="audio-timer" id="audioTimer">00:00:00</div>
+          <div class="audio-status">Encrypted Connection</div>
+        </div>
+
+        <div class="video-footer" style="position:static; background:none; padding:0; gap:32px;">
+          <button class="ctrl-btn" id="audioSpeakerBtn" title="Speaker">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path
+                d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77zM3 9v6h4l5 5V3L7 8H3z" />
+            </svg>
+          </button>
+          <button class="ctrl-btn" id="audioMicBtn" title="Mute">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path
+                d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 14 3 14zM17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+            </svg>
+          </button>
+          <button class="ctrl-btn danger" id="audioHangupBtn" title="Hang Up">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path
+                d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.58.9-.98.49-1.87 1.15-2.62 1.93-.19.19-.51.27-.77.27-.26 0-.51-.07-.71-.27L.29 13.5a.98.98 0 0 1 0-1.41C2.75 9.63 7.17 8 12 8s9.25 1.63 11.71 4.09a.98.98 0 0 1 0 1.41l-2.43 2.44c-.4.4-1.05.4-1.45.03-.75-.78-1.64-1.44-2.62-1.93-.35-.17-.58-.52-.58-.91v-3.1C15.15 9.25 13.6 9 12 9z" />
+            </svg>
+          </button>
+          <button class="ctrl-btn" id="audioInfoBtn" title="Info">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path
+                d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" />
+            </svg>
+          </button>
+        </div>
+      </div>
     </section>
 
     <div class="console" id="consoleLog" style="margin:12px 16px 16px;"></div>
-</div>
+  </div>
 
-<div id="infoDialog">
+  <div id="infoDialog">
     <div class="dialog-card">
-        <h2>Call Details</h2>
-        <p>Inmate: <b id="infoName">Loading...</b></p>
-        <p>Number: <b id="infoPhone">Loading...</b></p>
-        <p>Facility: <b id="infoJail">PrisonConnect Facility</b></p>
-        <button class="btn" style="margin-top:20px;" onclick="document.getElementById('infoDialog').style.display='none'">OK</button>
+      <h2>Call Details</h2>
+      <p>Inmate: <b id="infoName">Loading...</b></p>
+      <p>Number: <b id="infoPhone">Loading...</b></p>
+      <p>Facility: <b id="infoJail">PrisonConnect Facility</b></p>
+      <button class="btn" style="margin-top:20px;"
+        onclick="document.getElementById('infoDialog').style.display='none'">OK</button>
     </div>
-</div>
+  </div>
 
-<div id="endingOverlay">
+  <div id="endingOverlay">
     <div class="spinner"></div>
     <h1 style="color:var(--text);">Ending call...</h1>
     <p class="sub" style="color:var(--amber);">Do not close the tab or browser.</p>
-</div>
+  </div>
 
-<script>
+  <script>
+
+
+
+
+    function enablePageProtection() {
+
+      // ===========================
+      // Disable Right Click
+      // ===========================
+      document.addEventListener("contextmenu", e => e.preventDefault());
+
+      // ===========================
+      // Disable Text Selection
+      // ===========================
+      document.addEventListener("selectstart", e => e.preventDefault());
+
+      // ===========================
+      // Disable Copy / Paste / Cut
+      // ===========================
+      ["copy", "cut", "paste"].forEach(event => {
+        document.addEventListener(event, e => e.preventDefault());
+      });
+
+      // ===========================
+      // Disable Drag
+      // ===========================
+      document.addEventListener("dragstart", e => e.preventDefault());
+
+      // ===========================
+      // Disable Keyboard Shortcuts
+      // ===========================
+      document.addEventListener("keydown", function (e) {
+
+        const key = e.key.toUpperCase();
+
+        // F12, F6, F10, F11
+        if (["F12", "F6", "F10", "F11"].includes(key)) {
+          e.preventDefault();
+          e.stopPropagation();
+          return false;
+        }
+
+        // Ctrl + U/S/P/A
+        if (e.ctrlKey && ["U", "S", "P", "A"].includes(key)) {
+          e.preventDefault();
+          e.stopPropagation();
+          return false;
+        }
+
+        // Ctrl + Shift + I/J/C/K
+        if (e.ctrlKey && e.shiftKey &&
+          ["I", "J", "C", "K"].includes(key)) {
+          e.preventDefault();
+          e.stopPropagation();
+          return false;
+        }
+
+      });
+
+      // ===========================
+      // Disable Image Drag
+      // ===========================
+      window.addEventListener("load", () => {
+        document.querySelectorAll("img").forEach(img => {
+          img.setAttribute("draggable", "false");
+        });
+      });
+
+      // ===========================
+      // Disable Console Logs
+      // ===========================
+      console.log = () => { };
+      console.warn = () => { };
+      console.error = () => { };
+      console.info = () => { };
+      console.debug = () => { };
+
+      // ===========================
+      // Detect DevTools
+      // ===========================
+      let devtoolsOpened = false;
+
+      setInterval(() => {
+
+        const threshold = 160;
+
+        if (
+          window.outerWidth - window.innerWidth > threshold ||
+          window.outerHeight - window.innerHeight > threshold
+        ) {
+
+          if (!devtoolsOpened) {
+
+            devtoolsOpened = true;
+
+            document.body.innerHTML = `
+                    <div style="
+                        display:flex;
+                        justify-content:center;
+                        align-items:center;
+                        height:100vh;
+                        background:#000;
+                        color:#fff;
+                        font-family:sans-serif;
+                        font-size:26px;
+                        text-align:center;
+                    ">
+                        Security Violation Detected
+                    </div>
+                `;
+
+            setTimeout(() => {
+              location.replace("about:blank");
+            }, 500);
+
+          }
+
+        }
+
+      }, 500);
+
+      // ===========================
+      // Debugger Trap
+      // ===========================
+      setInterval(() => {
+        debugger;
+      }, 1000);
+
+    }
+
+    window.onload = () => {
+      enablePageProtection();
+    };
+
     /* ======================================================================
         1. SUPABASE INITIALIZATION & CONFIG
        ====================================================================== */
@@ -370,9 +907,9 @@
 
 
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-        auth: {
-            persistSession: false
-        }
+      auth: {
+        persistSession: false
+      }
     });
 
     const params = new URLSearchParams(location.search);
@@ -403,7 +940,7 @@
       roomText.textContent = 'Error';
     } else {
       roomText.textContent = `Room ${roomId}`;
-      landingMeta.textContent = `token: ${token.substring(0,8)}... &middot; Authenticating`;
+      landingMeta.textContent = `token: ${token.substring(0, 8)}... &middot; Authenticating`;
     }
 
     /* ======================================================================
@@ -416,9 +953,9 @@
 
     (async function init() {
       if (!roomId) return;
-      
+
       log(`Connecting to room ${roomId}...`);
-      
+
       // Fetch Room & Inmate Data
       const { data, error } = await supabaseClient
         .from('call_rooms')
@@ -462,7 +999,7 @@
       const safeSend = (msg) => {
         try {
           roomChannel.send(msg);
-        } catch(e) {
+        } catch (e) {
           console.warn("Signaling send failed", e);
         }
       };
@@ -500,13 +1037,13 @@
         // IMPORTANT: Unmute remote video upon user interaction to satisfy browser policy
         const remoteVideo = document.getElementById('remoteVideo');
         if (remoteVideo) {
-            remoteVideo.muted = false;
-            remoteVideo.play().catch(e => console.warn("Initial play failed", e));
+          remoteVideo.muted = false;
+          remoteVideo.play().catch(e => console.warn("Initial play failed", e));
         }
 
         const { data: valid } = await supabaseClient.rpc('verify_room_otp', {
-            target_room: roomId,
-            input_otp: code
+          target_room: roomId,
+          input_otp: code
         });
 
         if (valid) {
@@ -539,12 +1076,12 @@
     let isWebReadySent = false;
 
     const ICONS = {
-        mic: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 14 3 14zM17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>`,
-        micOff: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17c0-.06.02-.11.02-.17V5c0-1.66-1.34-3-3-3S9 3.34 9 5v.18l5.98 5.99zM4.27 3L3 4.27l6.01 6.01V11c0 1.66 1.33 3 2.99 3 .22 0 .44-.03.65-.08l1.1 1.1c-.54.35-1.14.62-1.75.73V21h-2v-3.08c-3.39-.49-6-3.39-6-6.92h1.7c0 2.85 2.06 5.28 4.8 5.86l1.54 1.54c-1.31.26-2.61.32-3.79.32z"/></svg>`,
-        speaker: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77zM3 9v6h4l5 5V3L7 8H3z"/></svg>`,
-        speakerOff: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>`,
-        camera: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 4h-3.17L15 2H9L7.17 4H4C2.9 4 2 4.9 2 6v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 14c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>`,
-        cameraOff: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 6.5l-4 4V7c0-.55-.45-1-1-1H9.82L21 17.18V6.5zM3.27 2L2 3.27 4.73 6H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.21 0 .39-.08.54-.18L19.73 21 21 19.73 3.27 2z"/></svg>`
+      mic: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 14 3 14zM17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>`,
+      micOff: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17c0-.06.02-.11.02-.17V5c0-1.66-1.34-3-3-3S9 3.34 9 5v.18l5.98 5.99zM4.27 3L3 4.27l6.01 6.01V11c0 1.66 1.33 3 2.99 3 .22 0 .44-.03.65-.08l1.1 1.1c-.54.35-1.14.62-1.75.73V21h-2v-3.08c-3.39-.49-6-3.39-6-6.92h1.7c0 2.85 2.06 5.28 4.8 5.86l1.54 1.54c-1.31.26-2.61.32-3.79.32z"/></svg>`,
+      speaker: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77zM3 9v6h4l5 5V3L7 8H3z"/></svg>`,
+      speakerOff: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>`,
+      camera: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 4h-3.17L15 2H9L7.17 4H4C2.9 4 2 4.9 2 6v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 14c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>`,
+      cameraOff: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 6.5l-4 4V7c0-.55-.45-1-1-1H9.82L21 17.18V6.5zM3.27 2L2 3.27 4.73 6H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.21 0 .39-.08.54-.18L19.73 21 21 19.73 3.27 2z"/></svg>`
     };
 
     const rtcConfig = {
@@ -584,82 +1121,81 @@
     }
 
     async function startWebRtc(channel) {
-      showScreen('screen-call');
-
       const remoteVideo = document.getElementById('remoteVideo');
       const remoteStream = new MediaStream();
       if (remoteVideo) {
-          remoteVideo.srcObject = remoteStream;
-          // IMPORTANT: Do NOT set muted=true here as it overrides the user interaction unmute from verifyBtn
+        remoteVideo.srcObject = remoteStream;
+        // IMPORTANT: Do NOT set muted=true here as it overrides the user interaction unmute from verifyBtn
       }
 
       const safeSend = (msg) => {
-        try { channel.send(msg); } catch(e) { console.warn("Send failed", e); }
+        try { channel.send(msg); } catch (e) { console.warn("Send failed", e); }
       };
 
-      // Fullscreen/Immersive setup
-      document.body.style.padding = '0';
-      const dev = document.querySelector('.device');
-      dev.style.maxWidth = '100vw'; dev.style.height = '100vh'; dev.style.borderRadius = '0';
-      document.querySelector('.topbar').style.display = 'none';
-      logEl.style.display = 'none';
-
       const isVideo = currentCallType === 'VIDEO';
-      document.getElementById('videoLayout').style.display = isVideo ? 'flex' : 'none';
-      document.getElementById('audioOnlyUI').style.display = isVideo ? 'none' : 'flex';
 
       try {
         log("Requesting media permissions...");
         localStream = await navigator.mediaDevices.getUserMedia({
           video: isVideo ? {
-              facingMode: currentFacingMode,
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-              frameRate: { ideal: 30 }
+            facingMode: currentFacingMode,
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 30 }
           } : false,
           audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true,
-              sampleRate: 48000
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            sampleRate: 48000
           }
         });
 
+        // SUCCESS: Now we can hide logs and show call screen
+        showScreen('screen-call');
+        document.body.style.padding = '0';
+        const dev = document.querySelector('.device');
+        dev.style.maxWidth = '100vw'; dev.style.height = '100vh'; dev.style.borderRadius = '0';
+        document.querySelector('.topbar').style.display = 'none';
+
+        document.getElementById('videoLayout').style.display = isVideo ? 'flex' : 'none';
+        document.getElementById('audioOnlyUI').style.display = isVideo ? 'none' : 'flex';
+
         // Ensure AudioContext is running to keep the mic active
         try {
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            const audioCtx = new AudioContext();
-            const source = audioCtx.createMediaStreamSource(localStream);
-            log("Audio pipeline initialized", "ok");
-        } catch(e) { console.warn("AudioContext failed", e); }
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          const audioCtx = new AudioContext();
+          const source = audioCtx.createMediaStreamSource(localStream);
+          log("Audio pipeline initialized", "ok");
+        } catch (e) { console.warn("AudioContext failed", e); }
 
         if (isVideo) {
-            document.getElementById('localVideo').srcObject = localStream;
-            setupDrag(document.getElementById('localVideo'));
+          document.getElementById('localVideo').srcObject = localStream;
+          setupDrag(document.getElementById('localVideo'));
         }
 
         peerConnection = new RTCPeerConnection(rtcConfig);
 
         peerConnection.onconnectionstatechange = () => {
-            log("Connection State: " + peerConnection.connectionState,
-                peerConnection.connectionState === 'connected' ? 'ok' : '');
+          log("Connection State: " + peerConnection.connectionState,
+            peerConnection.connectionState === 'connected' ? 'ok' : '');
         };
 
         peerConnection.oniceconnectionstatechange = () => {
-            log("ICE State: " + peerConnection.iceConnectionState);
+          log("ICE State: " + peerConnection.iceConnectionState);
         };
 
         if (localStream) {
-            localStream.getTracks().forEach(t => {
-                log("Attaching local track: " + t.kind);
-                peerConnection.addTrack(t, localStream);
-            });
+          localStream.getTracks().forEach(t => {
+            log("Attaching local track: " + t.kind);
+            peerConnection.addTrack(t, localStream);
+          });
         }
 
         let isWebReadySent = false;
         const checkReadyToNegotiate = () => {
-            log("All systems ready. Signaling Android.", "ok");
-            safeSend({ type: 'broadcast', event: 'browser-media-ready', payload: { sender: 'web' } });
+          log("All systems ready. Signaling Android.", "ok");
+          safeSend({ type: 'broadcast', event: 'browser-media-ready', payload: { sender: 'web' } });
         };
 
         peerConnection.ontrack = (e) => {
@@ -668,35 +1204,35 @@
 
           // Workaround for Chrome/Edge audio policy
           if (e.track.kind === 'audio') {
-              const playRemote = () => {
-                  remoteVideo.play().then(() => {
-                      log("Audio playback active", "ok");
-                  }).catch(err => {
-                      log("Audio playback waiting for click", "warn");
-                  });
-              };
-              playRemote();
-              // Add a secondary attempt in case of initial race
-              setTimeout(playRemote, 1000);
+            const playRemote = () => {
+              remoteVideo.play().then(() => {
+                log("Audio playback active", "ok");
+              }).catch(err => {
+                log("Audio playback waiting for click", "warn");
+              });
+            };
+            playRemote();
+            // Add a secondary attempt in case of initial race
+            setTimeout(playRemote, 1000);
           }
 
           if (remoteVideo) {
-              remoteVideo.play().catch(err => {
-                  log("Playback blocked, will retry on click", "warn");
-              });
+            remoteVideo.play().catch(err => {
+              log("Playback blocked, will retry on click", "warn");
+            });
           }
         };
 
         peerConnection.onicecandidate = (e) => {
           if (e.candidate) {
             pendingCandidates.push({
-                candidate: e.candidate.candidate,
-                sdpMid: e.candidate.sdpMid,
-                sdpMLineIndex: e.candidate.sdpMLineIndex
+              candidate: e.candidate.candidate,
+              sdpMid: e.candidate.sdpMid,
+              sdpMLineIndex: e.candidate.sdpMLineIndex
             });
 
             if (!candidateTimer) {
-                candidateTimer = setTimeout(sendCandidateBatch, 100);
+              candidateTimer = setTimeout(sendCandidateBatch, 100);
             }
           }
         };
@@ -705,18 +1241,18 @@
 
         // --- SDP Bandwidth Munging ---
         function setVideoBitrate(sdp) {
-            let munged = sdp.replace(/a=fmtp:(.*) (.*)/g, (match, pt, params) => {
-                if (params.includes("x-google-max-bitrate") || params.includes("x-google-min-bitrate")) {
-                    return match;
-                }
-                return `a=fmtp:${pt} ${params};x-google-min-bitrate=1500;x-google-max-bitrate=4000`;
-            });
-
-            // Add bandwidth limit line (b=AS) right after m=video
-            if (munged.indexOf("m=video") !== -1) {
-                munged = munged.replace(/m=video (.*)\r\n/g, `m=video $1\r\nb=AS:4000\r\nb=TIAS:4000000\r\n`);
+          let munged = sdp.replace(/a=fmtp:(.*) (.*)/g, (match, pt, params) => {
+            if (params.includes("x-google-max-bitrate") || params.includes("x-google-min-bitrate")) {
+              return match;
             }
-            return munged;
+            return `a=fmtp:${pt} ${params};x-google-min-bitrate=1500;x-google-max-bitrate=4000`;
+          });
+
+          // Add bandwidth limit line (b=AS) right after m=video
+          if (munged.indexOf("m=video") !== -1) {
+            munged = munged.replace(/m=video (.*)\r\n/g, `m=video $1\r\nb=AS:4000\r\nb=TIAS:4000000\r\n`);
+          }
+          return munged;
         }
 
         channel
@@ -725,51 +1261,51 @@
               log("Offer received from Kiosk");
 
               if (peerConnection.signalingState !== "stable") {
-                  try { await peerConnection.setLocalDescription({type: "rollback"}); } catch(e){}
+                try { await peerConnection.setLocalDescription({ type: "rollback" }); } catch (e) { }
               }
 
               try {
-                  await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.offer));
-                  const answer = await peerConnection.createAnswer();
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.offer));
+                const answer = await peerConnection.createAnswer();
 
-                  // Munge answer for high quality
-                  if (isVideo) {
-                      answer.sdp = setVideoBitrate(answer.sdp);
-                  }
+                // Munge answer for high quality
+                if (isVideo) {
+                  answer.sdp = setVideoBitrate(answer.sdp);
+                }
 
-                  await peerConnection.setLocalDescription(answer);
-                  safeSend({ type: 'broadcast', event: 'answer', payload: { sender: 'web', answer } });
+                await peerConnection.setLocalDescription(answer);
+                safeSend({ type: 'broadcast', event: 'answer', payload: { sender: 'web', answer } });
 
-                  while (iceCandidateQueue.length > 0) {
-                      const c = iceCandidateQueue.shift();
-                      peerConnection.addIceCandidate(new RTCIceCandidate(c)).catch(e => {});
-                  }
+                while (iceCandidateQueue.length > 0) {
+                  const c = iceCandidateQueue.shift();
+                  peerConnection.addIceCandidate(new RTCIceCandidate(c)).catch(e => { });
+                }
               } catch (err) {
-                  log("SDP Error: " + err.message, "warn");
+                log("SDP Error: " + err.message, "warn");
               }
             }
           })
           .on('broadcast', { event: 'candidates-batch' }, async ({ payload }) => {
             if (payload.sender === 'android') {
               payload.candidates.forEach(c => {
-                 if (c.candidate) {
-                    if (peerConnection.remoteDescription && peerConnection.remoteDescription.type) {
-                        peerConnection.addIceCandidate(new RTCIceCandidate(c)).catch(e => {});
-                    } else {
-                        iceCandidateQueue.push(c);
-                    }
-                 }
+                if (c.candidate) {
+                  if (peerConnection.remoteDescription && peerConnection.remoteDescription.type) {
+                    peerConnection.addIceCandidate(new RTCIceCandidate(c)).catch(e => { });
+                  } else {
+                    iceCandidateQueue.push(c);
+                  }
+                }
               });
             }
           })
           .on('broadcast', { event: 'hangup' }, () => terminateCall())
           .subscribe((status) => {
-             if (status === 'SUBSCRIBED') {
-                isWebReadySent = true;
-                log("Signaling ready", "ok");
-                safeSend({ type: 'broadcast', event: 'web-ready', payload: { sender: 'web' } });
-                checkReadyToNegotiate();
-             }
+            if (status === 'SUBSCRIBED') {
+              isWebReadySent = true;
+              log("Signaling ready", "ok");
+              safeSend({ type: 'broadcast', event: 'web-ready', payload: { sender: 'web' } });
+              checkReadyToNegotiate();
+            }
           });
 
         callTimer = setInterval(() => {
@@ -784,7 +1320,18 @@
 
       } catch (err) {
         log('Media Error: ' + err.message, 'warn');
-        alert("Please allow Camera & Mic access to join the call.");
+        showScreen('screen-permission');
+
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          document.getElementById('permDesc').innerHTML = "Access was <b>denied</b>. Please click the <b>Lock icon</b> in your address bar, reset permissions, and try again.";
+        } else {
+          document.getElementById('permDesc').textContent = "Could not access camera or mic: " + err.message;
+        }
+
+        document.getElementById('retryPermBtn').onclick = () => {
+          log("Retrying media access...");
+          startWebRtc(channel);
+        };
       }
     }
 
@@ -792,11 +1339,11 @@
         4. CONTROLS LOGIC
        ====================================================================== */
     const hangup = () => {
-        const channel = supabaseClient.channel(`room_${roomId}`);
-        channel.send({ type: 'broadcast', event: 'hangup', payload: { sender: 'web' } });
+      const channel = supabaseClient.channel(`room_${roomId}`);
+      channel.send({ type: 'broadcast', event: 'hangup', payload: { sender: 'web' } });
 
-        // Immediate local cleanup and redirect
-        terminateCall();
+      // Immediate local cleanup and redirect
+      terminateCall();
     };
 
     function terminateCall() {
@@ -820,105 +1367,106 @@
 
       // Full reset and redirect to null/blank as requested
       setTimeout(() => {
-          window.location.replace('about:blank');
+        window.location.replace('about:blank');
       }, 1500);
     }
 
     const toggleMic = (btn) => {
-        isMicMuted = !isMicMuted;
-        if (localStream) {
-            localStream.getAudioTracks().forEach(t => t.enabled = !isMicMuted);
-        }
-        btn.classList.toggle('active', isMicMuted);
-        btn.innerHTML = isMicMuted ? ICONS.micOff : ICONS.mic;
-        log(isMicMuted ? "Microphone Muted" : "Microphone Unmuted");
+      isMicMuted = !isMicMuted;
+      if (localStream) {
+        localStream.getAudioTracks().forEach(t => t.enabled = !isMicMuted);
+      }
+      btn.classList.toggle('active', isMicMuted);
+      btn.innerHTML = isMicMuted ? ICONS.micOff : ICONS.mic;
+      log(isMicMuted ? "Microphone Muted" : "Microphone Unmuted");
     };
 
     const toggleSpeaker = (btn) => {
-        isSpeakerMuted = !isSpeakerMuted;
-        const remoteVideo = document.getElementById('remoteVideo');
-        if (remoteVideo) {
-            remoteVideo.muted = isSpeakerMuted;
-        }
-        btn.classList.toggle('active', isSpeakerMuted);
-        btn.innerHTML = isSpeakerMuted ? ICONS.speakerOff : ICONS.speaker;
-        log(isSpeakerMuted ? "Speaker Muted" : "Speaker Unmuted");
+      isSpeakerMuted = !isSpeakerMuted;
+      const remoteVideo = document.getElementById('remoteVideo');
+      if (remoteVideo) {
+        remoteVideo.muted = isSpeakerMuted;
+      }
+      btn.classList.toggle('active', isSpeakerMuted);
+      btn.innerHTML = isSpeakerMuted ? ICONS.speakerOff : ICONS.speaker;
+      log(isSpeakerMuted ? "Speaker Muted" : "Speaker Unmuted");
     };
 
     const toggleCamera = (btn) => {
-        isCameraOff = !isCameraOff;
-        if (localStream) {
-            localStream.getVideoTracks().forEach(t => t.enabled = !isCameraOff);
-        }
-        btn.classList.toggle('active', isCameraOff);
-        btn.innerHTML = isCameraOff ? ICONS.cameraOff : ICONS.camera;
-        log(isCameraOff ? "Camera Disabled" : "Camera Enabled");
+      isCameraOff = !isCameraOff;
+      if (localStream) {
+        localStream.getVideoTracks().forEach(t => t.enabled = !isCameraOff);
+      }
+      btn.classList.toggle('active', isCameraOff);
+      btn.innerHTML = isCameraOff ? ICONS.cameraOff : ICONS.camera;
+      log(isCameraOff ? "Camera Disabled" : "Camera Enabled");
     };
 
     // Video Controls
     document.getElementById('videoHangupBtn').onclick = hangup;
-    document.getElementById('videoMicBtn').onclick = function() { toggleMic(this); };
-    document.getElementById('videoSpeakerBtn').onclick = function() { toggleSpeaker(this); };
-    document.getElementById('videoCameraBtn').onclick = function() { toggleCamera(this); };
+    document.getElementById('videoMicBtn').onclick = function () { toggleMic(this); };
+    document.getElementById('videoSpeakerBtn').onclick = function () { toggleSpeaker(this); };
+    document.getElementById('videoCameraBtn').onclick = function () { toggleCamera(this); };
 
     // Audio Controls
     document.getElementById('audioHangupBtn').onclick = hangup;
-    document.getElementById('audioMicBtn').onclick = function() { toggleMic(this); };
-    document.getElementById('audioSpeakerBtn').onclick = function() { toggleSpeaker(this); };
+    document.getElementById('audioMicBtn').onclick = function () { toggleMic(this); };
+    document.getElementById('audioSpeakerBtn').onclick = function () { toggleSpeaker(this); };
     document.getElementById('audioInfoBtn').onclick = () => {
-        document.getElementById('infoDialog').style.display = 'flex';
+      document.getElementById('infoDialog').style.display = 'flex';
     };
 
     // Drag Logic for Local Video
     function setupDrag(el) {
-        let x = 0, y = 0, initialX, initialY;
-        el.onmousedown = dragMouseDown;
-        el.ontouchstart = dragMouseDown;
+      let x = 0, y = 0, initialX, initialY;
+      el.onmousedown = dragMouseDown;
+      el.ontouchstart = dragMouseDown;
 
-        function dragMouseDown(e) {
-            e = e || window.event;
-            e.preventDefault();
-            initialX = (e.type === 'touchstart') ? e.touches[0].clientX : e.clientX;
-            initialY = (e.type === 'touchstart') ? e.touches[0].clientY : e.clientY;
-            document.onmouseup = closeDragElement;
-            document.ontouchend = closeDragElement;
-            document.onmousemove = elementDrag;
-            document.ontouchmove = elementDrag;
-        }
+      function dragMouseDown(e) {
+        e = e || window.event;
+        e.preventDefault();
+        initialX = (e.type === 'touchstart') ? e.touches[0].clientX : e.clientX;
+        initialY = (e.type === 'touchstart') ? e.touches[0].clientY : e.clientY;
+        document.onmouseup = closeDragElement;
+        document.ontouchend = closeDragElement;
+        document.onmousemove = elementDrag;
+        document.ontouchmove = elementDrag;
+      }
 
-        function elementDrag(e) {
-            e = e || window.event;
-            const curX = (e.type === 'touchmove') ? e.touches[0].clientX : e.clientX;
-            const curY = (e.type === 'touchmove') ? e.touches[0].clientY : e.clientY;
-            x = initialX - curX;
-            y = initialY - curY;
-            initialX = curX;
-            initialY = curY;
-            el.style.top = (el.offsetTop - y) + "px";
-            el.style.left = (el.offsetLeft - x) + "px";
-            el.style.right = 'auto'; // Reset right during drag
-        }
+      function elementDrag(e) {
+        e = e || window.event;
+        const curX = (e.type === 'touchmove') ? e.touches[0].clientX : e.clientX;
+        const curY = (e.type === 'touchmove') ? e.touches[0].clientY : e.clientY;
+        x = initialX - curX;
+        y = initialY - curY;
+        initialX = curX;
+        initialY = curY;
+        el.style.top = (el.offsetTop - y) + "px";
+        el.style.left = (el.offsetLeft - x) + "px";
+        el.style.right = 'auto'; // Reset right during drag
+      }
 
-        function closeDragElement() {
-            document.onmouseup = null;
-            document.onmousemove = null;
-            document.ontouchend = null;
-            document.ontouchmove = null;
-        }
+      function closeDragElement() {
+        document.onmouseup = null;
+        document.onmousemove = null;
+        document.ontouchend = null;
+        document.ontouchmove = null;
+      }
     }
 
     // Toggle overlays on click
     document.getElementById('screen-call').onclick = (e) => {
-        if (currentCallType !== 'VIDEO') return;
-        if (e.target.closest('.ctrl-btn')) return;
-        const header = document.getElementById('videoHeader');
-        const footer = document.getElementById('videoFooter');
-        const visible = header.style.opacity !== '0';
-        header.style.opacity = visible ? '0' : '1';
-        footer.style.opacity = visible ? '0' : '1';
+      if (currentCallType !== 'VIDEO') return;
+      if (e.target.closest('.ctrl-btn')) return;
+      const header = document.getElementById('videoHeader');
+      const footer = document.getElementById('videoFooter');
+      const visible = header.style.opacity !== '0';
+      header.style.opacity = visible ? '0' : '1';
+      footer.style.opacity = visible ? '0' : '1';
     };
 
-</script>
+  </script>
 
 </body>
+
 </html>

@@ -6,7 +6,6 @@ const corsHeaders = {
 }
 
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -15,29 +14,28 @@ serve(async (req) => {
     const { to, message } = await req.json()
 
     if (!to || !message) {
-      throw new Error('Missing "to" or "message" in request body')
+      return new Response(
+        JSON.stringify({ success: false, message: 'Missing "to" or "message"' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+      )
     }
 
-    // Twilio credentials from environment variables
     const accountSid = Deno.env.get('TWILIO_ACCOUNT_SID')
     const authToken = Deno.env.get('TWILIO_AUTH_TOKEN')
     const fromNumber = Deno.env.get('TWILIO_PHONE_NUMBER')
 
     if (!accountSid || !authToken || !fromNumber) {
-      throw new Error('Twilio credentials not configured in environment variables')
+      return new Response(
+        JSON.stringify({ success: false, message: 'Twilio credentials not configured' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+      )
     }
 
-    // Ensure "to" number starts with + (Twilio requirement for E.164)
-    // The Android app cleans non-digits, so we add it back if missing
     const formattedTo = to.startsWith('+') ? to : `+${to}`
-
-    console.log(`Sending SMS to ${formattedTo}: ${message}`)
-
-    // Basic Auth for Twilio API
     const authHeader = btoa(`${accountSid}:${authToken}`)
 
     const response = await fetch(
-      `https://api.twilio.org/2010-04-01/Accounts/${accountSid}/Messages.json`,
+      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
       {
         method: 'POST',
         headers: {
@@ -55,32 +53,32 @@ serve(async (req) => {
     const result = await response.json()
 
     if (!response.ok) {
-      console.error('Twilio API error:', result)
+      console.error('Twilio Error:', result)
       return new Response(
-        JSON.stringify({ error: result.message || 'Failed to send SMS via Twilio' }),
-        {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: response.status,
-        }
+        JSON.stringify({
+            success: false,
+            message: result.message || 'Twilio rejected the request',
+            code: result.code
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
       )
     }
 
     return new Response(
-      JSON.stringify({ success: true, sid: result.sid }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200,
-      }
+      JSON.stringify({
+          success: true,
+          sid: result.sid,
+          status: result.status,
+          message: 'SMS accepted for delivery'
+      }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     )
 
   } catch (error) {
-    console.error('Edge Function error:', error.message)
+    console.error('Function error:', error.message)
     return new Response(
-      JSON.stringify({ error: error.message }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 400,
-      }
+      JSON.stringify({ success: false, message: error.message }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     )
   }
 })
